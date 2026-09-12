@@ -19,7 +19,7 @@ O projeto deve ser conteinerizado utilizando Docker e Docker Compose[cite: 1].
 - [X] O serviço inicial no `docker-compose.yml` deve iniciar um container Python simples (pode ser executando um script *dummy* provisório de "Hello World" ou mantendo o container em loop/idle) apenas para validar o funcionamento.
 
 ## 5. Requisitos de Entrega (Definition of Done)
-- [ ] A estrutura de diretórios (`api/`, `services/`, `repositories/`) foi criada e versionada (usar `.gitkeep` em pastas vazias, se necessário)[cite: 1].
-- [ ] Os arquivos `Dockerfile` e `docker-compose.yml` foram configurados corretamente[cite: 1].
+- [X] A estrutura de diretórios (`api/`, `services/`, `repositories/`) foi criada e versionada (usar `.gitkeep` em pastas vazias, se necessário)[cite: 1].
+- [X] Os arquivos `Dockerfile` e `docker-compose.yml` foram configurados corretamente[cite: 1].
 - [ ] É possível levantar o ambiente completo utilizando **exclusivamente** o comando `docker-compose up` no terminal[cite: 1].
 - [ ] O código gerado foi commitado e "pushado" (pushed) para o repositório central no GitHub.
