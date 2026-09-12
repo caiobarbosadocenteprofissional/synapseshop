@@ -1,0 +1,6 @@
+services:
+  synapseshop:
+    build: .
+    image: synapseshop:dev
+    container_name: synapseshop
+    command: python -c "print('Hello World from SynapseShop!')"
