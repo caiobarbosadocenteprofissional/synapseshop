@@ -14,9 +14,9 @@ A estrutura de pastas principal deve refletir a separação de responsabilidades
 
 ## 4. Requisitos de Infraestrutura (Containers)
 O projeto deve ser conteinerizado utilizando Docker e Docker Compose[cite: 1].
-- [ ] Criar um `Dockerfile` na raiz do projeto utilizando uma imagem oficial do Python.
-- [ ] Criar um arquivo `docker-compose.yml` na raiz do projeto.
-- [ ] O serviço inicial no `docker-compose.yml` deve iniciar um container Python simples (pode ser executando um script *dummy* provisório de "Hello World" ou mantendo o container em loop/idle) apenas para validar o funcionamento.
+- [X] Criar um `Dockerfile` na raiz do projeto utilizando uma imagem oficial do Python.
+- [X] Criar um arquivo `docker-compose.yml` na raiz do projeto.
+- [X] O serviço inicial no `docker-compose.yml` deve iniciar um container Python simples (pode ser executando um script *dummy* provisório de "Hello World" ou mantendo o container em loop/idle) apenas para validar o funcionamento.
 
 ## 5. Requisitos de Entrega (Definition of Done)
 - [ ] A estrutura de diretórios (`api/`, `services/`, `repositories/`) foi criada e versionada (usar `.gitkeep` em pastas vazias, se necessário)[cite: 1].

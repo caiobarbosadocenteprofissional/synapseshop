@@ -12,10 +12,10 @@ Esta etapa representa o marco zero do projeto. O foco absoluto é alinhar a vis�
 * **Arquiteto, Desenvolvedor(a) e Especialista em IA:** Planejar a estrutura inicial da documentação (`README.md` e `PROMPTS.md`).
 
 ## 4. Requisitos de Entrega (Definition of Done)
-- [ ] O repositório único do projeto foi criado no GitHub[cite: 1].
-- [ ] Todos os membros do time possuem permissão de contribuição (escrita/push) no repositório.
-- [ ] Um arquivo `README.md` foi adicionado à raiz do projeto, contendo obrigatoriamente:
+- [X] O repositório único do projeto foi criado no GitHub[cite: 1].
+- [X] Todos os membros do time possuem permissão de contribuição (escrita/push) no repositório.
+- [X] Um arquivo `README.md` foi adicionado à raiz do projeto, contendo obrigatoriamente:
   - O nome da equipe e os integrantes com seus respectivos papéis.
   - O domínio escolhido para a loja online.
   - Uma breve descrição do MVP e a imagem (ou descrição textual) da arquitetura-alvo em 6 camadas[cite: 1].
-- [ ] Um arquivo `PROMPTS.md` foi criado na raiz do repositório para o futuro registro do histórico de uso de IA generativa[cite: 1].
+- [X] Um arquivo `PROMPTS.md` foi criado na raiz do repositório para o futuro registro do histórico de uso de IA generativa[cite: 1].
