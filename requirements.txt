@@ -1,0 +1,3 @@
+# Dependências do SynapseShop.
+# As bibliotecas serão adicionadas incrementalmente conforme as próximas aulas
+# (ex.: framework web, banco de dados) — mantendo o escopo SpecDD das aulas atuais.
