@@ -1,6 +1,43 @@
 services:
-  synapseshop:
+  api:
     build: .
     image: synapseshop:dev
-    container_name: synapseshop
-    command: python -c "print('Hello World from SynapseShop!')"
+    container_name: synapseshop-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: synapseshop
+      POSTGRES_USER: synapseshop
+      POSTGRES_PASSWORD: synapseshop
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: synapseshop-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: synapseshop
+      POSTGRES_USER: synapseshop
+      POSTGRES_PASSWORD: synapseshop
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U synapseshop -d synapseshop"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
