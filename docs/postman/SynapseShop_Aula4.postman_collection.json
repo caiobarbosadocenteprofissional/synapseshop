@@ -1,0 +1,373 @@
+{
+  "info": {
+    "_postman_id": "b6f1c2a4-4a0e-4d1e-9c3a-synapseshop4a",
+    "name": "SynapseShop — API v1 (Aula 4)",
+    "description": "CRUD da API principal (Django REST Framework) sob /api/v1/. Rotas de Category e Item.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000"
+    },
+    {
+      "key": "category_id",
+      "value": "1"
+    },
+    {
+      "key": "item_id",
+      "value": "1"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "GET /health",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Status ok', () => pm.expect(pm.response.json().status).to.eql('ok'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Categories",
+      "item": [
+        {
+          "name": "GET /api/v1/categories/ (List)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/categories/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "categories", ""]
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/categories/ (Create)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201 Created', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "if (body.id) { pm.collectionVariables.set('category_id', body.id); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Eletronicos\",\n  \"description\": \"Categoria de produtos eletronicos\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/categories/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "categories", ""]
+            }
+          }
+        },
+        {
+          "name": "GET /api/v1/categories/{id}/ (Retrieve)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/categories/{{category_id}}/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "categories", "{{category_id}}", ""]
+            }
+          }
+        },
+        {
+          "name": "PUT /api/v1/categories/{id}/ (Update)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Eletronicos e Games\",\n  \"description\": \"Categoria atualizada\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/categories/{{category_id}}/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "categories", "{{category_id}}", ""]
+            }
+          }
+        },
+        {
+          "name": "DELETE /api/v1/categories/{id}/ (Delete)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 204 No Content', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/categories/{{category_id}}/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "categories", "{{category_id}}", ""]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Items",
+      "item": [
+        {
+          "name": "GET /api/v1/items/ (List)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/items/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "items", ""]
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/items/ (Create)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201 Created', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "if (body.id) { pm.collectionVariables.set('item_id', body.id); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Notebook Gamer\",\n  \"description\": \"Notebook 16GB RAM\",\n  \"price\": \"4999.90\",\n  \"category\": {{category_id}},\n  \"is_active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/items/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "items", ""]
+            }
+          }
+        },
+        {
+          "name": "GET /api/v1/items/{id}/ (Retrieve)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/items/{{item_id}}/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "items", "{{item_id}}", ""]
+            }
+          }
+        },
+        {
+          "name": "PATCH /api/v1/items/{id}/ (Partial Update)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"price\": \"4599.90\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/items/{{item_id}}/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "items", "{{item_id}}", ""]
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/items/ (Invalid payload -> 400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400 Bad Request', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"\",\n  \"price\": \"-10.00\",\n  \"category\": 999999\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/items/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "items", ""]
+            }
+          }
+        },
+        {
+          "name": "GET /api/v1/items/999999/ (Not Found -> 404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404 Not Found', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/items/999999/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "items", "999999", ""]
+            }
+          }
+        },
+        {
+          "name": "DELETE /api/v1/items/{id}/ (Delete)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 204 No Content', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/items/{{item_id}}/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "items", "{{item_id}}", ""]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

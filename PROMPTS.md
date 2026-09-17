@@ -47,6 +47,21 @@ preenchendo:
 - **Prompt:** "Integre a API e o Banco de Dados no docker-compose.yml com injeção de variáveis de ambiente mínimas."
 - **Resultado / Ajustes:** Serviço `api` (build da imagem, porta 8000, `depends_on` do banco com `service_healthy`) e serviço `postgres` (`postgres:16-alpine`, porta 5432, volume `pgdata`, `healthcheck` com `pg_isready`). As variáveis `POSTGRES_*` são injetadas no contêiner da API. Ambiente completo sobe com `docker-compose up`.
 
+### 2026-09-17 — Equipe SynapseShop — opencode
+- **Contexto:** Aula 4 — planejamento e estruturação do projeto Django/DRF em camadas.
+- **Prompt:** "Faça o planejamento de execução das specs_da_aula_4. Siga a diretriz incremental_specdd e as skills que foram definidas."
+- **Resultado / Ajustes:** Plano incremental definido com decisões de estrutura: projeto `config/` e apps Django por camada (`repositories/` = models; `api/` = serializers/viewsets/rotas), banco SQLite, coleção Postman e `/health` portado para Django. Adicionado `Django==5.2.*` e `djangorestframework==3.18.0` ao `requirements.txt`, criados `manage.py` e `config/settings.py` (INSTALLED_APPS enxuto, envs com defaults de dev). Intervenção manual: descartados `admin`, `auth` e qualquer biblioteca de JWT/Redis/FastAPI/mensageria para respeitar o escopo da aula.
+
+### 2026-09-17 — Equipe SynapseShop — opencode
+- **Contexto:** Aula 4 — models `Category`/`Item`, serializers, viewsets e roteamento `/api/v1/`.
+- **Prompt:** "Modele as entidades base (Category e Item) com o ORM do Django, crie ModelSerializers com validações e exponha ModelViewSets sob /api/v1/ via DefaultRouter."
+- **Resultado / Ajustes:** `repositories/models.py` com `Category` (name único) e `Item` (`price` Decimal com `MinValueValidator(0)`, FK `category` com `CASCADE`/`related_name`, `is_active`, timestamps). `api/serializers.py` com validações customizadas (`validate_name`, `validate_price`) retornando 400; `category_name` somente-leitura. ViewSets em `api/views.py`, roteador em `api/urls.py` (`/api/v1/categories/` e `/api/v1/items/`) e view `health` (`JsonResponse`). Migração `0001_initial` gerada com `makemigrations` e validada com `python manage.py check`. Intervenção manual: omitidos campos de estoque (Aula 5) para não antecipar escopo.
+
+### 2026-09-17 — Equipe SynapseShop — opencode
+- **Contexto:** Aula 4 — checklist "IA-safe", coleção Postman e documentação.
+- **Prompt:** "Elabore o checklist IA-safe no repositório, exporte as rotas em uma coleção Postman e atualize README e PROMPTS.md."
+- **Resultado / Ajustes:** Criado `docs/CHECKLIST_IA_SAFE.md` (escopo, imports, tipos, validações, status HTTP, segurança). Coleção exportada em `docs/postman/SynapseShop_Aula4.postman_collection.json` (13 requisições com asserts de 200/201/204/400/404). README recebeu a seção "API Principal (Aula 4)". Ajustados `Dockerfile` (CMD detecta e aplica migrações + `runserver`), `docker-compose.yml` (`start_period` no healthcheck) e `.dockerignore` (`docs/`, `db.sqlite3`). Intervenção manual: removido `api/health.py` (servidor stdlib) para evitar código morto.
+
 <!-- Adicione aqui as entradas do histórico conforme o template da seção 2. -->
 
 ---
