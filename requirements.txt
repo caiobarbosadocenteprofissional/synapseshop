@@ -1,3 +1,5 @@
 # Dependências do SynapseShop.
-# As bibliotecas serão adicionadas incrementalmente conforme as próximas aulas
-# (ex.: framework web, banco de dados) — mantendo o escopo SpecDD das aulas atuais.
+# Bibliotecas adicionadas incrementalmente conforme as aulas (SpecDD).
+# Aula 4: Django + Django REST Framework para o CRUD da API principal.
+Django==5.2.*
+djangorestframework==3.18.0
