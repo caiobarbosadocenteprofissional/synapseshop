@@ -1,4 +1,5 @@
 # =====================================================================
+# ESTRATÉGIA DE MULTISTAGEBUILD
 # ESTÁGIO 1: builder — compila e prepara as dependências isoladamente.
 # =====================================================================
 FROM python:3.12-slim AS builder
@@ -53,4 +54,4 @@ USER appuser
 
 EXPOSE 8000
 
-CMD ["python", "api/health.py"]
+CMD ["sh", "-c", "python manage.py migrate --noinput && python manage.py runserver 0.0.0.0:8000"]

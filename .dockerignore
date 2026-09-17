@@ -8,8 +8,13 @@
 
 # Especificações/planejamento não entram no container.
 specs/
+docs/
 README.md
 PROMPTS.md
+
+# Banco local (SQLite) e arquivos gerados.
+db.sqlite3
+*.sqlite3
 
 # Artefatos Python.
 __pycache__/
