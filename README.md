@@ -159,6 +159,7 @@ docker-compose up
 | Serviço | Imagem | Porta | Objetivo |
 | :--- | :--- | :--- | :--- |
 | `api` | `synapseshop:dev` (build local) | `8000` | Executa a aplicação e expõe a rota de monitoramento `/health`. |
+| `inventory` | `synapseshop-inventory:dev` (build local) | `8100` | Microsserviço de estoque em FastAPI (Aula 5), com `/docs` e `/health`. |
 | `postgres` | `postgres:16-alpine` | `5432` | Banco de dados relacional do MVP (dados persistidos). |
 
 O serviço `api` recebe via variáveis de ambiente as credenciais essenciais do banco
@@ -245,7 +246,58 @@ para importação no Postman, e o guia de revisão de código gerado por IA est�
 
 ---
 
-## 9. Documentação & Especificações
+## 9. Microsserviço de Inventário (Aula 5) — FastAPI
+
+Microsserviço complementar de estoque (`inventory`) construído com **FastAPI**,
+conteinerizado separadamente e orquestrado pelo mesmo `docker-compose`. Nesta
+etapa o estado é mantido **em memória** — a modelagem relacional ocorre na
+Aula 6 e a autenticação na Aula 7 (escopo SpecDD preservado).
+
+### Estrutura
+
+| Caminho | Responsabilidade |
+| :--- | :--- |
+| `inventory/app/main.py` | Aplicação FastAPI, `/health` e raiz com informações do serviço. |
+| `inventory/app/schemas.py` | Modelos Pydantic (contratos de entrada, saída e validações). |
+| `inventory/app/storage.py` | Armazenamento em memória + dependency `get_store()`. |
+| `inventory/app/routes.py` | Rotas mínimas do inventário sob `/inventory/items`. |
+| `inventory/Dockerfile` | Imagem com multistage build e usuário não-root (porta `8100`). |
+
+### Endpoints
+
+| Método | Rota | Ação | Status |
+| :--- | :--- | :--- | :--- |
+| GET | `/health` | Monitoramento | 200 |
+| GET | `/inventory/items` | Lista itens de estoque | 200 |
+| POST | `/inventory/items` | Cria item de estoque | 201 / 400 |
+| GET | `/inventory/items/{id}/` | Detalha item | 200 / 404 |
+| PATCH | `/inventory/items/{id}/` | Atualiza item | 200 / 404 |
+| DELETE | `/inventory/items/{id}/` | Remove item | 204 / 404 |
+
+A **documentação automática (OpenAPI/Swagger)** está disponível em
+`http://localhost:8100/docs`.
+
+### Exemplos rápidos
+
+```bash
+curl http://localhost:8100/health
+curl http://localhost:8100/docs
+
+curl -X POST http://localhost:8100/inventory/items \
+  -H "Content-Type: application/json" \
+  -d '{"sku": "NB-001", "name": "Notebook 16GB", "quantity": 10}'
+
+curl http://localhost:8100/inventory/items
+curl http://localhost:8100/inventory/items/1
+```
+
+O padrão de prompts de IA da squad está definido em
+[`PROMPTS-TEMPLATE.md`](PROMPTS-TEMPLATE.md), com registro no
+[`PROMPTS.md`](PROMPTS.md).
+
+---
+
+## 10. Documentação & Especificações
 
 | Arquivo | Descrição |
 | :--- | :--- |
@@ -255,6 +307,8 @@ para importação no Postman, e o guia de revisão de código gerado por IA est�
 | [`specs/specs_da_aula_2.md`](specs/specs_da_aula_2.md) | Esqueleto do projeto em camadas e conteinerização (Docker). |
 | [`specs/specs_da_aula_3.md`](specs/specs_da_aula_3.md) | Docker essencial: multistage build, cache e Compose (API + banco). |
 | [`specs/specs_da_aula_4.md`](specs/specs_da_aula_4.md) | CRUD da API principal com Django REST Framework. |
+| [`specs/specs_da_aula_5.md`](specs/specs_da_aula_5.md) | Microsserviço de inventário em FastAPI. |
+| [`PROMPTS-TEMPLATE.md`](PROMPTS-TEMPLATE.md) | Template padrão de prompts de IA da squad. |
 | [`docs/CHECKLIST_IA_SAFE.md`](docs/CHECKLIST_IA_SAFE.md) | Checklist de revisão de código gerado por IA. |
 | [`docs/postman/SynapseShop_Aula4.postman_collection.json`](docs/postman/SynapseShop_Aula4.postman_collection.json) | Coleção Postman das rotas da Aula 4. |
 | [`specs/PROJECT_OVERVIEW.MD`](specs/PROJECT_OVERVIEW.MD) | Visão geral do SynapseShop e trilha de entregas (25 aulas). |

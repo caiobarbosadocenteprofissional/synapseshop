@@ -62,6 +62,21 @@ preenchendo:
 - **Prompt:** "Elabore o checklist IA-safe no repositório, exporte as rotas em uma coleção Postman e atualize README e PROMPTS.md."
 - **Resultado / Ajustes:** Criado `docs/CHECKLIST_IA_SAFE.md` (escopo, imports, tipos, validações, status HTTP, segurança). Coleção exportada em `docs/postman/SynapseShop_Aula4.postman_collection.json` (13 requisições com asserts de 200/201/204/400/404). README recebeu a seção "API Principal (Aula 4)". Ajustados `Dockerfile` (CMD detecta e aplica migrações + `runserver`), `docker-compose.yml` (`start_period` no healthcheck) e `.dockerignore` (`docs/`, `db.sqlite3`). Intervenção manual: removido `api/health.py` (servidor stdlib) para evitar código morto.
 
+### 2026-09-18 — Equipe SynapseShop — opencode
+- **Contexto:** Aula 5 — planejamento do microsserviço de inventário (porta 8100) e definição do escopo.
+- **Prompt:** "Seguindo as specs e as skills definidas execute a specs_da_aula_5."
+- **Resultado / Ajustes:** Plano incremental definido com decisões de estrutura: novo diretório `inventory/` com app FastAPI próprio (multistage no Dockerfile, porta 8100), estado em memória, `PROMPTS-TEMPLATE.md` na raiz e integração via `docker-compose.yml`. Consulta da versão mais recente do FastAPI (0.141.1) e uvicorn (0.53.0) para o pin no padrão do repo (`fastapi==0.141.*`, `uvicorn[standard]==0.53.*`).
+
+### 2026-09-18 — Equipe SynapseShop — opencode
+- **Contexto:** Aula 5 — geração do scaffold do microsserviço inventory com modelos Pydantic, tipagem estática e rotas mínimas.
+- **Prompt:** "Crie o scaffold do microsserviço de estoque em FastAPI com modelos Pydantic, dependency de armazenamento em memória e endpoints estruturados com response_model/status codes padrão, sem antecipar banco de dados (Aula 6) nem autenticação (Aula 7)."
+- **Resultado / Ajustes:** Criados `inventory/requirements.txt`, `app/schemas.py` (`HealthResponse`, `MessageResponse`, `InventoryItem`, `Create`/`Update` com `min_length`/`ge`), `app/storage.py` (`InventoryStore` em memória + `get_store()`), `app/routes.py` (CRUD sob `/inventory/items` com 200/201/204/404) e `app/main.py` (`GET /`, `GET /health`, título OpenAPI). `Dockerfile` em multistage com usuário não-root e `CMD uvicorn app.main:app --port 8100`; `inventory/.dockerignore` enxuto. Intervenção manual: ajustados campos de `InventoryItemUpdate` (todos opcionais via `exclude_unset`), protegido `.dockerignore` para não excluir `requirements.txt` do build e adicionadas respostas 404 explícitas no OpenAPI.
+
+### 2026-09-18 — Equipe SynapseShop — opencode
+- **Contexto:** Aula 5 — integração do inventory ao orquestrador, criação do `PROMPTS-TEMPLATE.md` e validação da documentação automática.
+- **Prompt:** "Integre o serviço de inventário ao docker-compose.yml com healthcheck próprio, crie o PROMPTS-TEMPLATE.md padronizando prompts da squad e valide o /docs do FastAPI."
+- **Resultado / Ajustes:** Serviço `inventory` adicionado ao `docker-compose.yml` (build `./inventory`, `synapseshop-inventory:dev`, porta `8100:8100`, `healthcheck` via `urllib` em `/health`). Criado `PROMPTS-TEMPLATE.md` com estrutura obrigatória (contexto, objetivo, restrições SpecDD, entrada, saída esperada, critérios de aceite) e exemplo preenchido da Aula 5. README atualizado (tabela de serviços, seção "Microsserviço de Inventário (Aula 5)" e tabela de documentação). Ambiente validado com `docker-compose up --build -d`, endpoints testados em `localhost:8100` e Swagger acessível em `/docs`.
+
 <!-- Adicione aqui as entradas do histórico conforme o template da seção 2. -->
 
 ---
