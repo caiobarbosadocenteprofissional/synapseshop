@@ -1,0 +1,6 @@
+# Dependências do microsserviço de inventário (Aula 5 — FastAPI).
+# Bibliotecas adicionadas incrementalmente conforme as aulas (SpecDD).
+# Aula 5: FastAPI + uvicorn para o scaffold do inventory service.
+# Sem SQLAlchemy/Alembic (Aula 6) e sem JWT/auth (Aula 7) neste momento.
+fastapi==0.141.*
+uvicorn[standard]==0.53.*
