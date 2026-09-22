@@ -94,6 +94,11 @@ preenchendo:
 - **Prompt:** "Execute e registre as evidências da Aula 6: `alembic upgrade head`, `alembic current/history/check`, demonstração de `alembic downgrade -1` seguido de `upgrade head`, smoke test e teste transacional com coleta de tempos; atualize a spec (DoD), o README, o PROMPTS.md e os docs de decisões técnicas."
 - **Resultado / Ajustes:** Migração `0001` aplicada e validada (tabela `inventory_items` com PK, índices `sku`/`name`, CHECK `quantity>=0`; `alembic_version=0001`); `alembic check` sem drift. Rollback seguro demonstrado (downgrade → `<base>` → upgrade → `0001 (head)`). `smoke_test` 12/12 PASS e `transactional_test` PASS (seed, consultas, update, rollback por duplicidade e por CHECK, ajuste de estoque, limpeza). Tempos registrados em `docs/METRICAS_AULA6.md` e decisões em `docs/DECISOES_TECNICAS_AULA6.md`. Intervenção manual: fix do `sys.path` para o `transactional_test` rodar dentro do contêiner.
 
+### 2026-09-21 — Equipe SynapseShop — opencode
+- **Contexto:** Infraestrutura — configuração por variáveis de ambiente via `.env`.
+- **Prompt:** "Planeje e execute a criação de variáveis de ambiente no projeto: `.env` na raiz consumido pelo docker-compose (interpolação `${VAR:-default}`), `.env.example` versionado, defaults nos serviços (incluindo `DJANGO_SECRET_KEY`/`DJANGO_DEBUG` no `api`), seção no README e registro no PROMPTS.md — sem antecipar escopo nova e sem nova dependência (sem python-dotenv, decidido pela equipe)."
+- **Resultado / Ajustes:** Criados `.env` (gitignored/dockerignored, já coberto) e `.env.example`; `docker-compose.yml` passou a interpolar `POSTGRES_*`, `DJANGO_SECRET_KEY` e `DJANGO_DEBUG` com defaults `:-` (incluiu `DJANGO_*` no `api` e `$POSTGRES_USER/DB` no healthcheck do `postgres`). `docker compose config` válido com e sem `.env`; containers saudáveis com variáveis injetadas (verificado via `printenv`); README ganhou a seção 10 "Variáveis de ambiente". Sem alterações em código Python (`settings.py`/`db.py` já liam as variáveis).
+
 ---
 
 ## 4. Nota

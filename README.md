@@ -327,7 +327,39 @@ O padrão de prompts de IA da squad está definido em
 
 ---
 
-## 10. Documentação & Especificações
+## 10. Variáveis de ambiente
+
+A configuração dos serviços é feita por variáveis de ambiente. O `docker-compose.yml`
+interpola essas variáveis (`${VAR}`) a partir do arquivo `.env` da raiz do projeto e injeta
+os valores nos contêineres. Para começar:
+
+```bash
+cp .env.example .env
+```
+
+O `.env` **não é versionado** (ver `.gitignore`/`.dockerignore`); o `.env.example` é o
+modelo versionado com todas as variáveis. Todos os valores têm default em `:-` no compose,
+então o ambiente também sobe sem `.env` (com os valores de dev).
+
+| Variável | Default | Consumida por |
+| :--- | :--- | :--- |
+| `DJANGO_SECRET_KEY` | `dev-insecure-synapseshop-change-me` | `api` (`config/settings.py`) |
+| `DJANGO_DEBUG` | `true` | `api` (`config/settings.py`) |
+| `POSTGRES_DB` | `synapseshop` | `postgres`, `api`, `inventory` |
+| `POSTGRES_USER` | `synapseshop` | `postgres`, `api`, `inventory` |
+| `POSTGRES_PASSWORD` | `synapseshop` | `postgres`, `api`, `inventory` |
+| `POSTGRES_HOST` | `postgres` | `api`, `inventory` |
+| `POSTGRES_PORT` | `5432` | `api`, `inventory` |
+| `DATABASE_URL` | (vazio) | `inventory` (prioridade sobre `POSTGRES_*`) |
+
+> **Fora do Docker:** os serviços mantêm defaults de código (ex.: `inventory/app/db.py` usa
+> `localhost:5432/synapseshop`; `config/settings.py` usa a secret/dev de dev), ou exporte as
+> variáveis manualmente no seu shell. Não há dependência de `python-dotenv` — o `.env` é de
+> responsabilidade do Docker Compose.
+
+---
+
+## 11. Documentação & Especificações
 
 | Arquivo | Descrição |
 | :--- | :--- |
@@ -341,6 +373,7 @@ O padrão de prompts de IA da squad está definido em
 | [`specs/specs_da_aula_6.md`](specs/specs_da_aula_6.md) | Modelagem relacional, índices e migrações (Alembic). |
 | [`docs/DECISOES_TECNICAS_AULA6.md`](docs/DECISOES_TECNICAS_AULA6.md) | Decisões técnicas da Aula 6. |
 | [`docs/METRICAS_AULA6.md`](docs/METRICAS_AULA6.md) | Tempos de execução das transações (Aula 6). |
+| [`.env.example`](.env.example) | Modelo versionado das variáveis de ambiente. |
 | [`PROMPTS-TEMPLATE.md`](PROMPTS-TEMPLATE.md) | Template padrão de prompts de IA da squad. |
 | [`docs/CHECKLIST_IA_SAFE.md`](docs/CHECKLIST_IA_SAFE.md) | Checklist de revisão de código gerado por IA. |
 | [`docs/postman/SynapseShop_Aula4.postman_collection.json`](docs/postman/SynapseShop_Aula4.postman_collection.json) | Coleção Postman das rotas da Aula 4. |
