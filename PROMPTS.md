@@ -79,6 +79,21 @@ preenchendo:
 
 <!-- Adicione aqui as entradas do histórico conforme o template da seção 2. -->
 
+### 2026-09-21 — Equipe SynapseShop — opencode
+- **Contexto:** Aula 6 — planejamento da camada relacional (SQLAlchemy + Alembic + PostgreSQL) no microsserviço de inventário.
+- **Prompt:** "Seguindo as diretrizes, as skills definidas e o template PROMPTS-TEMPLATE.md, planeje a execução da specs_da_aula_6: modelagem relacional, índices, integridade, migrações (Alembic), versionamento de schema, rollback seguro, repositórios transacionais, serviço consumidor e coleta de tempos."
+- **Resultado / Ajustes:** Decidido implementar a camada relacional no `inventory` (FastAPI), coerente com o `storage.py` da Aula 5 ("escopo exclusivo da Aula 6") e com o README; entidade `InventoryItem` (tabela `inventory_items`) escolhida como base. Evitou-se misturar dois ORMs no Django e antecipar JWT/Redis/mensageria. Dependências pinadas no padrão do repo (`SQLAlchemy==2.0.*`, `alembic==1.19.*`, `psycopg[binary]==3.3.*`) após consulta às versões atuais (2.0.52/1.19.2/3.3.5).
+
+### 2026-09-21 — Equipe SynapseShop — opencode
+- **Contexto:** Aula 6 — implementação da camada transacional (db, model, Alembic, repositório, serviço, rotas).
+- **Prompt:** "Crie no inventory a camada de persistência relacional: engine/session (app/db.py), modelo ORM InventoryItem com índices essenciais (sku único, name) e integridade (NOT NULL, unique, CHECK quantity>=0), scaffold Alembic versionando o schema, InventoryRepository transacional (commit/rollback), InventoryService consumindo o repositório e rota PATCH /stock para a transação — sem antecipar auth (Aula 7), Redis (Aula 8) ou mensageria (Aulas 9-11)."
+- **Resultado / Ajustes:** Criados `app/db.py`, `app/models.py`, `app/repository.py`, `app/services.py`, `alembic.ini` + `migrations/` com revisão `0001`; `routes.py` passa a usar o serviço; `storage.py` removido (evita código morto). `Dockerfile` passou a executar `alembic upgrade head` no start e envs `POSTGRES_*` foram injetadas no compose. Intervenção manual: `updated_at` com `onupdate=func.now()`; rota `/stock` devolve 409 em regra de domínio; smoke test adaptado para banco persistente (SKU único + limpeza).
+
+### 2026-09-21 — Equipe SynapseShop — opencode
+- **Contexto:** Aula 6 — validação, rollback seguro e documentação (DoD).
+- **Prompt:** "Execute e registre as evidências da Aula 6: `alembic upgrade head`, `alembic current/history/check`, demonstração de `alembic downgrade -1` seguido de `upgrade head`, smoke test e teste transacional com coleta de tempos; atualize a spec (DoD), o README, o PROMPTS.md e os docs de decisões técnicas."
+- **Resultado / Ajustes:** Migração `0001` aplicada e validada (tabela `inventory_items` com PK, índices `sku`/`name`, CHECK `quantity>=0`; `alembic_version=0001`); `alembic check` sem drift. Rollback seguro demonstrado (downgrade → `<base>` → upgrade → `0001 (head)`). `smoke_test` 12/12 PASS e `transactional_test` PASS (seed, consultas, update, rollback por duplicidade e por CHECK, ajuste de estoque, limpeza). Tempos registrados em `docs/METRICAS_AULA6.md` e decisões em `docs/DECISOES_TECNICAS_AULA6.md`. Intervenção manual: fix do `sys.path` para o `transactional_test` rodar dentro do contêiner.
+
 ---
 
 ## 4. Nota

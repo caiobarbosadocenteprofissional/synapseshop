@@ -159,7 +159,7 @@ docker-compose up
 | Serviço | Imagem | Porta | Objetivo |
 | :--- | :--- | :--- | :--- |
 | `api` | `synapseshop:dev` (build local) | `8000` | Executa a aplicação e expõe a rota de monitoramento `/health`. |
-| `inventory` | `synapseshop-inventory:dev` (build local) | `8100` | Microsserviço de estoque em FastAPI (Aula 5), com `/docs` e `/health`. |
+| `inventory` | `synapseshop-inventory:dev` (build local) | `8100` | Microsserviço de estoque em FastAPI (Aulas 5–6), com `/docs` e persistência em PostgreSQL via Alembic. |
 | `postgres` | `postgres:16-alpine` | `5432` | Banco de dados relacional do MVP (dados persistidos). |
 
 O serviço `api` recebe via variáveis de ambiente as credenciais essenciais do banco
@@ -246,12 +246,13 @@ para importação no Postman, e o guia de revisão de código gerado por IA est�
 
 ---
 
-## 9. Microsserviço de Inventário (Aula 5) — FastAPI
+## 9. Microsserviço de Inventário — FastAPI (Aulas 5 e 6)
 
 Microsserviço complementar de estoque (`inventory`) construído com **FastAPI**,
-conteinerizado separadamente e orquestrado pelo mesmo `docker-compose`. Nesta
-etapa o estado é mantido **em memória** — a modelagem relacional ocorre na
-Aula 6 e a autenticação na Aula 7 (escopo SpecDD preservado).
+conteinerizado separadamente e orquestrado pelo mesmo `docker-compose`. Desde a
+**Aula 6** o estado é persistido no **PostgreSQL** com mapeamento via
+**SQLAlchemy 2.0** e **migrações versionadas com Alembic** (a autenticação JWT
+fica na Aula 7 — escopo SpecDD preservado).
 
 ### Estrutura
 
@@ -259,8 +260,13 @@ Aula 6 e a autenticação na Aula 7 (escopo SpecDD preservado).
 | :--- | :--- |
 | `inventory/app/main.py` | Aplicação FastAPI, `/health` e raiz com informações do serviço. |
 | `inventory/app/schemas.py` | Modelos Pydantic (contratos de entrada, saída e validações). |
-| `inventory/app/storage.py` | Armazenamento em memória + dependency `get_store()`. |
-| `inventory/app/routes.py` | Rotas mínimas do inventário sob `/inventory/items`. |
+| `inventory/app/db.py` | SQLAlchemy: `engine`, `Base`, `SessionLocal` e dependency `get_session()`. |
+| `inventory/app/models.py` | Modelo ORM `InventoryItem` (índices essenciais e integridade). |
+| `inventory/app/repository.py` | `InventoryRepository` — persistência transacional (commit/rollback). |
+| `inventory/app/services.py` | `InventoryService` — regras de domínio sobre o repositório. |
+| `inventory/app/routes.py` | Rotas do inventário sob `/inventory/items`. |
+| `inventory/migrations/` | Migrações Alembic (`versions/0001_create_inventory_items.py`). |
+| `inventory/scripts/` | Smoke test e teste transacional com coleta de tempos. |
 | `inventory/Dockerfile` | Imagem com multistage build e usuário não-root (porta `8100`). |
 
 ### Endpoints
@@ -269,13 +275,32 @@ Aula 6 e a autenticação na Aula 7 (escopo SpecDD preservado).
 | :--- | :--- | :--- | :--- |
 | GET | `/health` | Monitoramento | 200 |
 | GET | `/inventory/items` | Lista itens de estoque | 200 |
-| POST | `/inventory/items` | Cria item de estoque | 201 / 400 |
+| POST | `/inventory/items` | Cria item de estoque | 201 / 400 / 409 |
 | GET | `/inventory/items/{id}/` | Detalha item | 200 / 404 |
-| PATCH | `/inventory/items/{id}/` | Atualiza item | 200 / 404 |
+| PATCH | `/inventory/items/{id}/` | Atualiza item | 200 / 404 / 409 |
+| PATCH | `/inventory/items/{id}/stock` | Ajusta estoque (transação) | 200 / 404 / 409 |
 | DELETE | `/inventory/items/{id}/` | Remove item | 204 / 404 |
 
 A **documentação automática (OpenAPI/Swagger)** está disponível em
 `http://localhost:8100/docs`.
+
+### Migrações de schema (Alembic + PostgreSQL)
+
+Aplicadas automaticamente no start do contêiner (`alembic upgrade head`).
+Manualmente, dentro do contêiner:
+
+```bash
+docker compose exec inventory alembic current          # revisão corrente
+docker compose exec inventory alembic history          # histórico de revisões
+docker compose exec inventory alembic upgrade head     # aplica pendentes
+docker compose exec inventory alembic downgrade -1     # rollback de 1 revisão
+```
+
+O modelo relacional (`inventory_items`) contempla índices essenciais
+(`sku` único e `name`) e integridade relacional (`NOT NULL`, `sku` único e
+`CheckConstraint quantity >= 0`). Detalhes em
+[`docs/DECISOES_TECNICAS_AULA6.md`](docs/DECISOES_TECNICAS_AULA6.md) e métricas
+em [`docs/METRICAS_AULA6.md`](docs/METRICAS_AULA6.md).
 
 ### Exemplos rápidos
 
@@ -289,6 +314,11 @@ curl -X POST http://localhost:8100/inventory/items \
 
 curl http://localhost:8100/inventory/items
 curl http://localhost:8100/inventory/items/1
+
+# Ajuste transacional de estoque
+curl -X PATCH http://localhost:8100/inventory/items/1/stock \
+  -H "Content-Type: application/json" \
+  -d '{"delta": -2}'
 ```
 
 O padrão de prompts de IA da squad está definido em
@@ -308,6 +338,9 @@ O padrão de prompts de IA da squad está definido em
 | [`specs/specs_da_aula_3.md`](specs/specs_da_aula_3.md) | Docker essencial: multistage build, cache e Compose (API + banco). |
 | [`specs/specs_da_aula_4.md`](specs/specs_da_aula_4.md) | CRUD da API principal com Django REST Framework. |
 | [`specs/specs_da_aula_5.md`](specs/specs_da_aula_5.md) | Microsserviço de inventário em FastAPI. |
+| [`specs/specs_da_aula_6.md`](specs/specs_da_aula_6.md) | Modelagem relacional, índices e migrações (Alembic). |
+| [`docs/DECISOES_TECNICAS_AULA6.md`](docs/DECISOES_TECNICAS_AULA6.md) | Decisões técnicas da Aula 6. |
+| [`docs/METRICAS_AULA6.md`](docs/METRICAS_AULA6.md) | Tempos de execução das transações (Aula 6). |
 | [`PROMPTS-TEMPLATE.md`](PROMPTS-TEMPLATE.md) | Template padrão de prompts de IA da squad. |
 | [`docs/CHECKLIST_IA_SAFE.md`](docs/CHECKLIST_IA_SAFE.md) | Checklist de revisão de código gerado por IA. |
 | [`docs/postman/SynapseShop_Aula4.postman_collection.json`](docs/postman/SynapseShop_Aula4.postman_collection.json) | Coleção Postman das rotas da Aula 4. |
