@@ -29,12 +29,21 @@ services:
     restart: unless-stopped
     ports:
       - "8100:8100"
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: synapseshop
+      POSTGRES_USER: synapseshop
+      POSTGRES_PASSWORD: synapseshop
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health')"]
       interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 10s
+      retries: 10
+      start_period: 30s
 
   postgres:
     image: postgres:16-alpine

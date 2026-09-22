@@ -1,6 +1,10 @@
 # Dependências do microsserviço de inventário (Aula 5 — FastAPI).
 # Bibliotecas adicionadas incrementalmente conforme as aulas (SpecDD).
 # Aula 5: FastAPI + uvicorn para o scaffold do inventory service.
-# Sem SQLAlchemy/Alembic (Aula 6) e sem JWT/auth (Aula 7) neste momento.
+# Aula 6: SQLAlchemy + Alembic + psycopg para a camada relacional em PostgreSQL.
+# Sem JWT/auth (Aula 7) e sem Redis (Aula 8) neste momento.
 fastapi==0.141.*
 uvicorn[standard]==0.53.*
+SQLAlchemy==2.0.*
+alembic==1.19.*
+psycopg[binary]==3.3.*

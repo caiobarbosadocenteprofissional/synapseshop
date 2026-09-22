@@ -54,3 +54,14 @@ class InventoryItemUpdate(BaseModel):
         default=None, min_length=1, max_length=100, description="Nome do item."
     )
     quantity: int = Field(default=None, ge=0, description="Quantidade em estoque.")
+
+
+class StockAdjustRequest(BaseModel):
+    """Payload de ajuste de estoque (transação do serviço de inventário).
+
+    `delta` positivo é uma entrada e negativo uma saída. A operação é
+    transacional: o estoque nunca pode ficar negativo (regra de domínio
+    reforçada por `CheckConstraint` no banco).
+    """
+
+    delta: int = Field(description="Variação de estoque (positivo = entrada, negativo = saída).")

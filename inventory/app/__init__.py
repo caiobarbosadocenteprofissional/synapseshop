@@ -1,6 +1,8 @@
 """Microsserviço de inventário (FastAPI) — Pacote `app`.
 
-Scaffold da Aula 5: apenas endpoints estruturados com tipagem estática,
-modelos Pydantic e respostas padrão. Dados em memória — a modelagem
-relacional (banco de dados) ocorre na Aula 6 e a autenticação na Aula 7.
+Endpoints estruturados com tipagem estática, modelos Pydantic e respostas
+padrão. Desde a Aula 6 os dados são persistidos no PostgreSQL via
+SQLAlchemy + Alembic (camada relacional transacional).
 """
+
+from __future__ import annotations
