@@ -17,6 +17,7 @@ env/
 ENV/
 .env
 .env.*
+!.env.example
 *.env
 
 # Testes / cobertura
