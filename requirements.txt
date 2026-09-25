@@ -3,3 +3,8 @@
 # Aula 4: Django + Django REST Framework para o CRUD da API principal.
 Django==5.2.*
 djangorestframework==3.18.0
+# Aula 7: JWT (djangorestframework-simplejwt) para autenticação baseada em papéis.
+djangorestframework-simplejwt==5.5.*
+# Aula 7: driver PostgreSQL (psycopg 3) — a API principal passou a usar o mesmo
+# PostgreSQL do Compose já usado pelo `inventory` (mesmo pin da camada de dados).
+psycopg[binary]==3.3.*

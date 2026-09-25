@@ -1,6 +1,29 @@
+from decimal import Decimal
+
+from django.contrib.auth.models import AbstractUser
 from django.core.validators import MinValueValidator
 from django.db import models
-from decimal import Decimal
+
+
+class User(AbstractUser):
+    """Usuário customizado com papéis distintos (Aula 7 — JWT por roles).
+
+    Oferece os papéis ``admin`` e ``user``. Usuários ``admin`` também são
+    marcados como ``is_staff``/``is_superuser`` via o papel nas rotas da API.
+    """
+
+    class Roles(models.TextChoices):
+        ADMIN = "admin", "Admin"
+        USER = "user", "User"
+
+    role = models.CharField(
+        max_length=10,
+        choices=Roles.choices,
+        default=Roles.USER,
+    )
+
+    class Meta:
+        ordering = ["username"]
 
 
 class Category(models.Model):
