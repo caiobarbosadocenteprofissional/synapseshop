@@ -20,6 +20,10 @@
   SQLite com migrações nativas (escopo das Aulas 4); sua evolução para PostgreSQL
   será decidida em consenso da squad quando necessário.
 
+> **Revisado na Aula 7.** A squad decidiu a evolução para PostgreSQL: a API principal
+> migrou de SQLite para o mesmo PostgreSQL do Compose, agora gerenciado pelo ORM do
+> Django (nenhum segundo ORM). Ver `DECISOES_TECNICAS_AULA7.md` §12.
+
 ## 2. Entidade base modelada
 
 - **Decisão:** a entidade `InventoryItem` → tabela `inventory_items`.

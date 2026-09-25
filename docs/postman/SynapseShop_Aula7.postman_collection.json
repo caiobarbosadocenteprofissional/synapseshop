@@ -1,0 +1,599 @@
+{
+  "info": {
+    "_postman_id": "b6f1c2a4-4a0e-4d1e-9c3a-synapseshop7a",
+    "name": "SynapseShop — API v1 (Aula 7)",
+    "description": "Autenticação JWT com papéis (admin/user), throttling, proteção das rotas administrativas, paginação e filtros. Requer os usuários demo criados por `python manage.py seed_demo_users` (executado no start do container). Rote os cenários na ordem: Health -> Auth -> Acesso Negado -> Admin -> Paginação/Filtros -> Throttling.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000"
+    },
+    {
+      "key": "admin_username",
+      "value": "admin"
+    },
+    {
+      "key": "admin_password",
+      "value": "admin"
+    },
+    {
+      "key": "user_username",
+      "value": "user"
+    },
+    {
+      "key": "user_password",
+      "value": "user"
+    },
+    {
+      "key": "admin_token",
+      "value": ""
+    },
+    {
+      "key": "admin_refresh",
+      "value": ""
+    },
+    {
+      "key": "user_token",
+      "value": ""
+    },
+    {
+      "key": "category_id",
+      "value": "1"
+    },
+    {
+      "key": "item_id",
+      "value": "1"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "GET /health (público)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Body status ok', () => pm.expect(pm.response.json().status).to.eql('ok'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth (JWT)",
+      "item": [
+        {
+          "name": "POST /api/v1/auth/token/ — login admin (sucesso)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Access e refresh presentes', () => {",
+                  "  pm.expect(body).to.have.property('access');",
+                  "  pm.expect(body).to.have.property('refresh');",
+                  "});",
+                  "pm.test('Claim role = admin', () => pm.expect(body.role).to.eql('admin'));",
+                  "pm.collectionVariables.set('admin_token', body.access);",
+                  "pm.collectionVariables.set('admin_refresh', body.refresh);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": {
+              "Content-Type": "application/json"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"username\": \"{{admin_username}}\",\n    \"password\": \"{{admin_password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/token/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "token"]
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/auth/token/ — login user (sucesso)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Claim role = user', () => pm.expect(body.role).to.eql('user'));",
+                  "pm.collectionVariables.set('user_token', body.access);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": {
+              "Content-Type": "application/json"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"username\": \"{{user_username}}\",\n    \"password\": \"{{user_password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/token/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "token"]
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/auth/token/ — credencial inválida (erro 401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401 Unauthorized', () => pm.response.to.have.status(401));",
+                  "pm.test('Código de erro no body', () => pm.expect(pm.response.json()).to.have.property('detail'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": {
+              "Content-Type": "application/json"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"username\": \"{{admin_username}}\",\n    \"password\": \"senha-errada\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/token/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "token"]
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/auth/token/refresh/ — renovar token (sucesso)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Novo access e role admin', () => {",
+                  "  pm.expect(body).to.have.property('access');",
+                  "  pm.expect(body.role).to.eql('admin');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": {
+              "Content-Type": "application/json"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"refresh\": \"{{admin_refresh}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/token/refresh/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "token", "refresh"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Acesso Negado",
+      "item": [
+        {
+          "name": "GET /api/v1/categories/ sem token (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401 Unauthorized', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/categories/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "categories"]
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/categories/ como user (403 — não-admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 403 Forbidden', () => pm.response.to.have.status(403));",
+                  "pm.test('Detail de permissão negada', () => pm.expect(pm.response.json()).to.have.property('detail'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer {{user_token}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"Somente admin poderia criar\",\n    \"description\": \"Acesso negado\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/categories/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "categories"]
+            }
+          }
+        },
+        {
+          "name": "DELETE /api/v1/categories/{{category_id}}/ como user (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 403 Forbidden', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": {
+              "Authorization": "Bearer {{user_token}}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/categories/{{category_id}}/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "categories", "{{category_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin (rotas administrativas)",
+      "item": [
+        {
+          "name": "POST /api/v1/categories/ como admin (201)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201 Created', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('category_id', String(body.id));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer {{admin_token}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"Eletronicos\",\n    \"description\": \"Produtos eletronicos\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/categories/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "categories"]
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/items/ como admin (201)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201 Created', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('item_id', String(body.id));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer {{admin_token}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"Notebook 16GB\",\n    \"description\": \"Notebook de alto desempenho\",\n    \"price\": \"4999.90\",\n    \"category\": {{category_id}},\n    \"is_active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/items/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "items"]
+            }
+          }
+        },
+        {
+          "name": "PATCH /api/v1/items/{{item_id}}/ como admin (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Nome atualizado', () => pm.expect(pm.response.json().name).to.eql('Notebook 32GB'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer {{admin_token}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"Notebook 32GB\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/items/{{item_id}}/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "items", "{{item_id}}"]
+            }
+          }
+        },
+        {
+          "name": "DELETE /api/v1/categories/{{category_id}}/ como admin (204)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 204 No Content', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": {
+              "Authorization": "Bearer {{admin_token}}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/categories/{{category_id}}/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "categories", "{{category_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Paginação e Filtros",
+      "item": [
+        {
+          "name": "GET /api/v1/categories/ paginado (envelope)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Envelope de paginação (count/results)', () => {",
+                  "  pm.expect(body).to.have.property('count');",
+                  "  pm.expect(body).to.have.property('next');",
+                  "  pm.expect(body).to.have.property('previous');",
+                  "  pm.expect(body).to.have.property('results');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": {
+              "Authorization": "Bearer {{admin_token}}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/categories/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "categories"]
+            }
+          }
+        },
+        {
+          "name": "GET /api/v1/items/?page_size=5 (página menor)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Respeita page_size=5', () => pm.expect(body.results.length).to.be.at.most(5));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": {
+              "Authorization": "Bearer {{admin_token}}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/items/?page_size=5",
+              "host": ["{{base_url}}"],
+              "query": [
+                {
+                  "key": "page_size",
+                  "value": "5"
+                }
+              ],
+              "path": ["api", "v1", "items"]
+            }
+          }
+        },
+        {
+          "name": "GET /api/v1/items/?search=&is_active=&category= (filtros)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Filtros aplicados', () => pm.expect(pm.response.json()).to.have.property('results'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": {
+              "Authorization": "Bearer {{user_token}}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/items/?search=Notebook&is_active=true&category={{category_id}}&ordering=price",
+              "host": ["{{base_url}}"],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "Notebook"
+                },
+                {
+                  "key": "is_active",
+                  "value": "true"
+                },
+                {
+                  "key": "category",
+                  "value": "{{category_id}}"
+                },
+                {
+                  "key": "ordering",
+                  "value": "price"
+                }
+              ],
+              "path": ["api", "v1", "items"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Throttling",
+      "item": [
+        {
+          "name": "POST /api/v1/auth/token/ — 6º login no minuto (429)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const url = pm.collectionVariables.get('base_url') + '/api/v1/auth/token/';",
+                  "const creds = JSON.stringify({",
+                  "  username: pm.collectionVariables.get('user_username'),",
+                  "  password: pm.collectionVariables.get('user_password')",
+                  "});",
+                  "const burn = (i, done) => {",
+                  "  if (i >= 5) return done();",
+                  "  pm.sendRequest({",
+                  "    url: url,",
+                  "    method: 'POST',",
+                  "    header: { 'Content-Type': 'application/json' },",
+                  "    body: { mode: 'raw', raw: creds }",
+                  "  }, () => burn(i + 1, done));",
+                  "};",
+                  "burn(0, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 429 Too Many Requests (throttled)', () => pm.response.to.have.status(429));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": {
+              "Content-Type": "application/json"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"username\": \"{{user_username}}\",\n    \"password\": \"{{user_password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/token/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "token"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

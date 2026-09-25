@@ -162,9 +162,10 @@ docker-compose up
 | `inventory` | `synapseshop-inventory:dev` (build local) | `8100` | Microsserviço de estoque em FastAPI (Aulas 5–6), com `/docs` e persistência em PostgreSQL via Alembic. |
 | `postgres` | `postgres:16-alpine` | `5432` | Banco de dados relacional do MVP (dados persistidos). |
 
-O serviço `api` recebe via variáveis de ambiente as credenciais essenciais do banco
-(`POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`).
-Dados do banco são persistidos no volume `pgdata`.
+O serviço `api` recebe via variáveis de ambiente as credenciais do banco
+(`POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`)
+e conecta no serviço `postgres` pelo hostname interno `postgres`, aguardando o
+`service_healthy` antes de subir. Dados do banco são persistidos no volume `pgdata`.
 
 ### Procedimentos
 
@@ -178,23 +179,30 @@ Dados do banco são persistidos no volume `pgdata`.
 A imagem utiliza **multistage build** (`builder` gera as dependências; `runtime` mantém a
 imagem final enxuta), executa com **usuário não-root** e gerencia o **cache de dependências**
 copiando o `requirements.txt` antes do código. No start, o contêiner aplica as migrações
-(`python manage.py migrate`) e sobe o servidor de desenvolvimento do Django na porta `8000`.
+(`python manage.py migrate`), cria os usuários demo para autenticação
+(`python manage.py seed_demo_users`, Aula 7) e sobe o servidor de desenvolvimento do Django
+na porta `8000`.
 
 ---
 
 ## 8. API Principal (Aula 4) — Django REST Framework
 
 A API principal é construída com **Django 5.2 LTS** + **Django REST Framework 3.18**, com
-operações CRUD completas sob rotas versionadas em `/api/v1/`. Nesta etapa o banco é o
-**SQLite** (arquivo local, sem driver extra), mantendo o escopo incremental até a modelagem
-relacional da Aula 6.
+operações CRUD completas sob rotas versionadas em `/api/v1/`. Desde a **Aula 7** o banco é o
+**PostgreSQL** do Compose (driver `psycopg` 3), o mesmo do microsserviço `inventory` e com
+persistência no volume `pgdata`. Nas Aulas 4–6 a API operava sobre SQLite, escopo agora
+superado.
+
+> **A partir da Aula 7,** todos os endpoints de `/api/v1/` exigem autenticação JWT
+> (leitura) e os endpoints de escrita exigem o papel `admin` — ver a
+> [Seção 9](#9-autenticação-jwt-papéis-e-throttling-aula-7).
 
 ### Estrutura
 
 | Caminho | Camada | Responsabilidade |
 | :--- | :--- | :--- |
 | `config/` | Projeto | `settings.py`, `urls.py`, `wsgi.py`/`asgi.py`. |
-| `repositories/` | Dados | App Django com os models `Category` e `Item`. |
+| `repositories/` | Dados | App Django com os models `User` (papéis Aula 7), `Category` e `Item`. |
 | `api/` | API | Serializers, ViewSets, roteador e a view `/health`. |
 | `services/` | Negócio | Reservado para regras de domínio (aulas futuras). |
 
@@ -202,16 +210,16 @@ relacional da Aula 6.
 
 | Método | Rota | Ação | Status |
 | :--- | :--- | :--- | :--- |
-| GET | `/api/v1/categories/` | Lista categorias | 200 |
-| POST | `/api/v1/categories/` | Cria categoria | 201 / 400 |
-| GET | `/api/v1/categories/{id}/` | Detalha categoria | 200 / 404 |
-| PUT/PATCH | `/api/v1/categories/{id}/` | Atualiza categoria | 200 / 400 / 404 |
-| DELETE | `/api/v1/categories/{id}/` | Remove categoria | 204 / 404 |
-| GET | `/api/v1/items/` | Lista itens | 200 |
-| POST | `/api/v1/items/` | Cria item | 201 / 400 |
-| GET | `/api/v1/items/{id}/` | Detalha item | 200 / 404 |
-| PUT/PATCH | `/api/v1/items/{id}/` | Atualiza item | 200 / 400 / 404 |
-| DELETE | `/api/v1/items/{id}/` | Remove item | 204 / 404 |
+| GET | `/api/v1/categories/` | Lista categorias | 200 / 401 |
+| POST | `/api/v1/categories/` | Cria categoria (admin) | 201 / 400 / 401 / 403 |
+| GET | `/api/v1/categories/{id}/` | Detalha categoria | 200 / 404 / 401 |
+| PUT/PATCH | `/api/v1/categories/{id}/` | Atualiza categoria (admin) | 200 / 400 / 401 / 403 / 404 |
+| DELETE | `/api/v1/categories/{id}/` | Remove categoria (admin) | 204 / 401 / 403 / 404 |
+| GET | `/api/v1/items/` | Lista itens | 200 / 401 |
+| POST | `/api/v1/items/` | Cria item (admin) | 201 / 400 / 401 / 403 |
+| GET | `/api/v1/items/{id}/` | Detalha item | 200 / 404 / 401 |
+| PUT/PATCH | `/api/v1/items/{id}/` | Atualiza item (admin) | 200 / 400 / 401 / 403 / 404 |
+| DELETE | `/api/v1/items/{id}/` | Remove item (admin) | 204 / 401 / 403 / 404 |
 | GET | `/health` | Monitoramento | 200 |
 
 O `Item` possui `name`, `description`, `price` (`Decimal`), `category` (FK) e `is_active`;
@@ -246,7 +254,92 @@ para importação no Postman, e o guia de revisão de código gerado por IA est�
 
 ---
 
-## 9. Microsserviço de Inventário — FastAPI (Aulas 5 e 6)
+## 9. Autenticação JWT, Papéis e Throttling (Aula 7)
+
+A camada de acesso seguro da API principal usa **JWT stateless** (Bearer) com **dois
+papéis** (`admin` e `user`), **throttling** contra força bruta e **paginação/filtros**
+nos endpoints críticos. Tudo configurável via variáveis de ambiente
+(`JWT_*`, `THROTTLE_*`, `SEED_*` — ver [Seção 11](#11-variáveis-de-ambiente)).
+
+### Usuários e papéis
+
+O modelo de usuário é customizado (`repositories.User`, sobre `AbstractUser`) e persistido
+em **PostgreSQL**, na tabela `repositories_user` do mesmo banco do `inventory`. O
+comando `python manage.py seed_demo_users` — executado no start do container — cria,
+de forma idempotente, dois usuários demo a partir das envs `SEED_*`:
+
+| Usuário | Papel | Credenciais default |
+| :--- | :--- | :--- |
+| `admin` | `admin` (acesso total) | `admin` / `admin` |
+| `user` | `user` (somente leitura) | `user` / `user` |
+
+### Fluxos de autenticação
+
+| Método | Rota | Ação | Status |
+| :--- | :--- | :--- | :--- |
+| POST | `/api/v1/auth/token/` | Login → `{access, refresh, role}` | 200 / 401 / 429 |
+| POST | `/api/v1/auth/token/refresh/` | Renova o access token | 200 / 401 / 429 |
+
+O token (access e refresh) carrega a claim `role`, permitindo ao cliente controlar a
+interface sem chamadas extras. Defaults: access 60 min, refresh 7 dias.
+
+### Proteção das rotas administrativas
+
+- **Leitura** (`GET` list/detail) de `/api/v1/categories/` e `/api/v1/items/`: exige
+  **autenticação** (qualquer papel) → sem token retorna **401**.
+- **Escrita** (`POST`/`PUT`/`PATCH`/`DELETE`): exige o papel **`admin`** → usuário comum
+  autenticado retorna **403**.
+- `/health` permanece **público** (monitoramento).
+
+### Throttling e segurança mínima
+
+| Escopo | Onde se aplica | Default |
+| :--- | :--- | :--- |
+| `anon` | endpoints DRF sem autenticação | `20/min` |
+| `user` | endpoints DRF autenticados | `200/min` |
+| `login` | `POST /api/v1/auth/token/*` (anti força bruta) | `5/min` |
+
+Exaurida a taxa de `login`, o servidor responde **429 Too Many Requests** antes mesmo de
+validar credenciais.
+
+### Paginação e filtros nos endpoints críticos
+
+- Paginação por **página numerada**: `{count, next, previous, results}` com
+  `page_size` default de **10** e ajuste via `?page_size=`.
+- **Busca** (`?search=`), **ordenação** (`?ordering=`) e filtros por **query param**:
+  `is_active`, `category` em `/api/v1/items/`.
+
+### Exemplos rápidos
+
+```bash
+# Login admin (guarde o access token)
+curl -X POST http://localhost:8000/api/v1/auth/token/ \
+  -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "admin"}'
+
+# Rotas protegidas: leitura exige Bearer
+curl http://localhost:8000/api/v1/categories/ \
+  -H "Authorization: Bearer <access_token>"
+
+# Escrita exige papel admin; usuário comum recebe 403
+curl -X POST http://localhost:8000/api/v1/categories/ \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Eletronicos", "description": "Produtos eletronicos"}'
+
+# Paginação e filtros nos itens
+curl "http://localhost:8000/api/v1/items/?search=Notebook&is_active=true&page_size=5" \
+  -H "Authorization: Bearer <access_token>"
+```
+
+Evidências e decisões em
+[`docs/DECISOES_TECNICAS_AULA7.md`](docs/DECISOES_TECNICAS_AULA7.md) e
+[`docs/METRICAS_AULA7.md`](docs/METRICAS_AULA7.md), com a coleção Postman em
+[`docs/postman/SynapseShop_Aula7.postman_collection.json`](docs/postman/SynapseShop_Aula7.postman_collection.json).
+
+---
+
+## 10. Microsserviço de Inventário — FastAPI (Aulas 5 e 6)
 
 Microsserviço complementar de estoque (`inventory`) construído com **FastAPI**,
 conteinerizado separadamente e orquestrado pelo mesmo `docker-compose`. Desde a
@@ -327,7 +420,7 @@ O padrão de prompts de IA da squad está definido em
 
 ---
 
-## 10. Variáveis de ambiente
+## 11. Variáveis de ambiente
 
 A configuração dos serviços é feita por variáveis de ambiente. O `docker-compose.yml`
 interpola essas variáveis (`${VAR}`) a partir do arquivo `.env` da raiz do projeto e injeta
@@ -345,21 +438,30 @@ então o ambiente também sobe sem `.env` (com os valores de dev).
 | :--- | :--- | :--- |
 | `DJANGO_SECRET_KEY` | `dev-insecure-synapseshop-change-me` | `api` (`config/settings.py`) |
 | `DJANGO_DEBUG` | `true` | `api` (`config/settings.py`) |
+| `JWT_ACCESS_TOKEN_MINUTES` | `60` | `api` (`config/settings.py` — lifetime do access JWT) |
+| `JWT_REFRESH_TOKEN_DAYS` | `7` | `api` (`config/settings.py` — lifetime do refresh JWT) |
+| `THROTTLE_ANON` | `20/min` | `api` (`config/settings.py` — throttling de não autenticados) |
+| `THROTTLE_USER` | `200/min` | `api` (`config/settings.py` — throttling de autenticados) |
+| `THROTTLE_LOGIN` | `5/min` | `api` (`config/settings.py` — throttling do login/token) |
+| `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD` / `SEED_ADMIN_EMAIL` | `admin` / `admin` / `admin@synapseshop.local` | `api` (`seed_demo_users`) |
+| `SEED_USER_USERNAME` / `SEED_USER_PASSWORD` / `SEED_USER_EMAIL` | `user` / `user` / `user@synapseshop.local` | `api` (`seed_demo_users`) |
 | `POSTGRES_DB` | `synapseshop` | `postgres`, `api`, `inventory` |
 | `POSTGRES_USER` | `synapseshop` | `postgres`, `api`, `inventory` |
 | `POSTGRES_PASSWORD` | `synapseshop` | `postgres`, `api`, `inventory` |
-| `POSTGRES_HOST` | `postgres` | `api`, `inventory` |
+| `POSTGRES_HOST` | `postgres` (Compose) · `localhost` (código) | `api`, `inventory` |
 | `POSTGRES_PORT` | `5432` | `api`, `inventory` |
 | `DATABASE_URL` | (vazio) | `inventory` (prioridade sobre `POSTGRES_*`) |
 
-> **Fora do Docker:** os serviços mantêm defaults de código (ex.: `inventory/app/db.py` usa
-> `localhost:5432/synapseshop`; `config/settings.py` usa a secret/dev de dev), ou exporte as
-> variáveis manualmente no seu shell. Não há dependência de `python-dotenv` — o `.env` é de
-> responsabilidade do Docker Compose.
+> **Fora do Docker:** os serviços mantêm defaults de código (`config/settings.py` e
+> `inventory/app/db.py` apontam para `localhost:5432/synapseshop`; `config/settings.py` usa a
+> secret de dev), ou exporte as variáveis manualmente no seu shell. Para rodar a API Django
+> fora do Compose é preciso um PostgreSQL acessível em `localhost:5432` — a instalação do
+> driver é `pip install -r requirements.txt` (inclui `psycopg[binary]`). Não há dependência
+> de `python-dotenv` — o `.env` é de responsabilidade do Docker Compose.
 
 ---
 
-## 11. Documentação & Especificações
+## 12. Documentação & Especificações
 
 | Arquivo | Descrição |
 | :--- | :--- |
@@ -371,10 +473,14 @@ então o ambiente também sobe sem `.env` (com os valores de dev).
 | [`specs/specs_da_aula_4.md`](specs/specs_da_aula_4.md) | CRUD da API principal com Django REST Framework. |
 | [`specs/specs_da_aula_5.md`](specs/specs_da_aula_5.md) | Microsserviço de inventário em FastAPI. |
 | [`specs/specs_da_aula_6.md`](specs/specs_da_aula_6.md) | Modelagem relacional, índices e migrações (Alembic). |
+| [`specs/specs_da_aula_7.md`](specs/specs_da_aula_7.md) | Autenticação JWT com papéis e throttling. |
 | [`docs/DECISOES_TECNICAS_AULA6.md`](docs/DECISOES_TECNICAS_AULA6.md) | Decisões técnicas da Aula 6. |
 | [`docs/METRICAS_AULA6.md`](docs/METRICAS_AULA6.md) | Tempos de execução das transações (Aula 6). |
+| [`docs/DECISOES_TECNICAS_AULA7.md`](docs/DECISOES_TECNICAS_AULA7.md) | Decisões técnicas da Aula 7. |
+| [`docs/METRICAS_AULA7.md`](docs/METRICAS_AULA7.md) | Evidências de autenticação/throttling/acesso (Aula 7). |
 | [`.env.example`](.env.example) | Modelo versionado das variáveis de ambiente. |
 | [`PROMPTS-TEMPLATE.md`](PROMPTS-TEMPLATE.md) | Template padrão de prompts de IA da squad. |
 | [`docs/CHECKLIST_IA_SAFE.md`](docs/CHECKLIST_IA_SAFE.md) | Checklist de revisão de código gerado por IA. |
 | [`docs/postman/SynapseShop_Aula4.postman_collection.json`](docs/postman/SynapseShop_Aula4.postman_collection.json) | Coleção Postman das rotas da Aula 4. |
+| [`docs/postman/SynapseShop_Aula7.postman_collection.json`](docs/postman/SynapseShop_Aula7.postman_collection.json) | Coleção Postman da Aula 7 (login, sucesso, erro e acesso negado). |
 | [`specs/PROJECT_OVERVIEW.MD`](specs/PROJECT_OVERVIEW.MD) | Visão geral do SynapseShop e trilha de entregas (25 aulas). |
