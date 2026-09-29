@@ -64,6 +64,41 @@ STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# Aula 8: cache-aside com Redis (Camada 5 — Dados da arquitetura-alvo).
+# O Compose provisiona o serviço `redis` e injeta REDIS_URL; `CACHE_ENABLED`
+# permite desligar o cache sem mexer no código (A/B de desempenho).
+# IGNORE_EXCEPTIONS mantém a API no PostgreSQL quando o Redis estiver fora do ar.
+CACHE_ENABLED = os.environ.get("CACHE_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+CACHE_TTL_LISTA = int(os.environ.get("CACHE_TTL_LISTA", "60"))
+CACHE_TTL_DETALHE = int(os.environ.get("CACHE_TTL_DETALHE", "300"))
+
+if CACHE_ENABLED:
+    CACHES = {
+        "default": {
+            "BACKEND": "django_redis.cache.RedisCache",
+            "LOCATION": os.environ.get("REDIS_URL", "redis://localhost:6379/1"),
+            "KEY_PREFIX": "synapseshop",
+            "TIMEOUT": CACHE_TTL_LISTA,
+            "OPTIONS": {
+                "CLIENT_CLASS": "django_redis.client.DefaultClient",
+                "IGNORE_EXCEPTIONS": True,
+                "SOCKET_CONNECT_TIMEOUT": 2,
+                "SOCKET_TIMEOUT": 2,
+            },
+        }
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "synapseshop-cache-off",
+        }
+    }
+
 REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": [
         "rest_framework.renderers.JSONRenderer",
@@ -107,4 +142,28 @@ SIMPLE_JWT = {
     "USER_ID_CLAIM": "user_id",
     "TOKEN_TYPE_CLAIM": "token_type",
     "AUTH_TOKEN_CLASSES": ("rest_framework_simplejwt.tokens.AccessToken",),
+}
+
+# Aula 8: logs estruturados (JSON) do ciclo de vida do cache e dos eventos de
+# domínio. As mensagens já são JSON em services/, por isso o formatador é
+# "%(message)s".
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "estruturado": {"format": "%(message)s"},
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "estruturado",
+        },
+    },
+    "loggers": {
+        "synapseshop": {
+            "handlers": ["console"],
+            "level": os.environ.get("LOG_LEVEL_SYNAPSESHOP", "INFO"),
+            "propagate": False,
+        },
+    },
 }

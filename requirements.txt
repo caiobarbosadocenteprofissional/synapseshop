@@ -8,3 +8,5 @@ djangorestframework-simplejwt==5.5.*
 # Aula 7: driver PostgreSQL (psycopg 3) — a API principal passou a usar o mesmo
 # PostgreSQL do Compose já usado pelo `inventory` (mesmo pin da camada de dados).
 psycopg[binary]==3.3.*
+# Aula 8: cache-aside com Redis (django-redis sobre o framework de cache do Django).
+django-redis==7.0.*
