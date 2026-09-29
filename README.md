@@ -161,11 +161,18 @@ docker-compose up
 | `api` | `synapseshop:dev` (build local) | `8000` | Executa a aplicação e expõe a rota de monitoramento `/health`. |
 | `inventory` | `synapseshop-inventory:dev` (build local) | `8100` | Microsserviço de estoque em FastAPI (Aulas 5–6), com `/docs` e persistência em PostgreSQL via Alembic. |
 | `postgres` | `postgres:16-alpine` | `5432` | Banco de dados relacional do MVP (dados persistidos). |
+| `redis` | `redis:7-alpine` | `6379` | Cache-aside do catálogo e contadores de métricas (Aula 8), com política `allkeys-lru` e volume `redisdata`. |
 
 O serviço `api` recebe via variáveis de ambiente as credenciais do banco
 (`POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`)
 e conecta no serviço `postgres` pelo hostname interno `postgres`, aguardando o
 `service_healthy` antes de subir. Dados do banco são persistidos no volume `pgdata`.
+
+Desde a **Aula 8** a API também depende do serviço `redis` (`REDIS_URL`,
+`CACHE_ENABLED`, `CACHE_TTL_LISTA`, `CACHE_TTL_DETALHE`), aguardando o
+`service_healthy` do Redis. Se o Redis ficar indisponível, a API continua
+respondendo a partir do PostgreSQL (`IGNORE_EXCEPTIONS=True`) e o header
+`X-Cache` passa a reportar `BYPASS`.
 
 ### Procedimentos
 
@@ -420,7 +427,159 @@ O padrão de prompts de IA da squad está definido em
 
 ---
 
-## 11. Variáveis de ambiente
+## 11. Cache-aside com Redis (Aula 8)
+
+O catálogo passou a ser servido por **cache-aside com Redis** (`django-redis`),
+com TTL, invalidação por eventos de domínio, header `X-Cache` e métricas de hit
+rate. O microsserviço `inventory` permanece intocado.
+
+### Estrutura
+
+| Caminho | Responsabilidade |
+| :--- | :--- |
+| `services/cache.py` | Cache-aside, assinatura de chaves, TTL, índices de invalidação, métricas e logs. |
+| `services/events.py` | Dispatcher in-process de eventos de domínio (`emitir`/`registrar`). |
+| `services/cache_invalidation.py` | Ligação evento do domínio → chaves de cache a invalidar. |
+| `api/views.py` | Cache nos endpoints de itens e `CacheStatsView`. |
+| `api/apps.py` | `ready()` registra os handlers de invalidação. |
+| `repositories/management/commands/seed_demo_catalog.py` | Catálogo de 5 categorias e 300 itens para medição. |
+| `scripts/bench_cache.py` | Benchmark de latência (média, p50, p95) e RPS. |
+| `scripts/smoke_test_cache.py` | Verificação de miss/hit, TTL, invalidação e métricas. |
+
+### Chaves e TTL
+
+| Chave Redis (após `KEY_PREFIX`) | Conteúdo | TTL |
+| :--- | :--- | ---: |
+| `synapseshop:1:itens:list:<assinatura>` | página da listagem já paginada | 60 s |
+| `synapseshop:1:item:<id>` | item único já serializado | 300 s |
+| `itens:list:indice` / `itens:detalhe:indice` | *sets* de chaves ativas, para invalidação | — |
+
+A listagem é cacheada por **assinatura**: SHA-1 de 12 caracteres dos query params
+relevantes (`search`, `ordering`, `category`, `is_active`, `min_price`,
+`max_price`, `page`, `page_size`) ordenados e normalizados, para que filtros
+diferentes nunca compartilhem a mesma chave.
+
+### Estratégia de invalidação
+
+A invalidação é orientada a **eventos de domínio**, não a tempo. Cada escrita
+emite um evento **após o commit** no PostgreSQL (`transaction.on_commit`), e o
+handler apaga as chaves afetadas:
+
+| Evento | Invalida |
+| :--- | :--- |
+| `ItemCriado` / `ItemAtualizado` / `ItemRemovido` | `item:<id>` e todas as `itens:list:*` |
+| `CategoryCriada` / `CategoryAtualizada` / `CategoryRemovida` | `item:<id>` e todas as `itens:list:*` |
+
+Pontos-chave da estratégia:
+
+- **`on_commit`:** sem ele, um rollback invalidaria o cache com o dado ainda no
+  banco, produzindo uma leitura inconsistente.
+- **Índice em *set*:** as chaves de listagem são registradas em
+  `itens:list:indice`, então a invalidação faz 1 `SMEMBERS` + `DEL` do conjunto,
+  sem `SCAN` nem `KEYS` sobre o keyspace.
+- **Falha isolada:** handler com `try/except` — evento de domínio nunca derruba
+  a requisição de escrita. Se o handler falhar, o log registra `handler_falhou`
+  e o TTL assume como rede de segurança.
+- **Sem broker:** dispatcher in-process, conforme a restrição SpecDD (Kafka e
+  RabbitMQ são das aulas 9-11). `emitir()` é o ponto de extensão futuro.
+
+### Endpoints de métricas
+
+| Método | Rota | Ação | Acesso |
+| :--- | :--- | :--- | :--- |
+| GET | `/api/v1/cache/stats/` | Hit rate por endpoint e global | admin |
+| POST | `/api/v1/cache/stats/` | Zera os contadores | admin |
+
+```json
+{
+  "cache_habilitado": true,
+  "endpoints": {
+    "itens:list":  {"hits": 40, "misses": 1, "total_lookups": 41, "hit_rate": 0.9756, "ttl_segundos": 60},
+    "item:detalhe": {"hits": 25, "misses": 1, "total_lookups": 26, "hit_rate": 0.9615, "ttl_segundos": 300}
+  },
+  "total_hits": 65, "total_misses": 2, "total_lookups": 67, "hit_rate": 0.9701
+}
+```
+
+### Observabilidade
+
+Header `X-Cache` em toda resposta de item: `HIT`, `MISS` ou `BYPASS` (cache
+desativado). Logs estruturados JSON:
+
+```json
+{"evento": "cache.lookup", "endpoint": "itens:list", "chave": "itens:list:c846376af757", "resultado": "MISS", "ttl": 60, "origem": "postgresql"}
+{"evento": "dominio.emitido", "nome": "ItemAtualizado", "payload": {"item_id": 110}}
+```
+
+### Desempenho medido
+
+Catálogo de 300 itens, par A/B na **mesma imagem** alternando apenas
+`CACHE_ENABLED`, 150 requisições com concorrência 1:
+
+| Endpoint | Média sem cache | Média com cache | Variação | RPS sem | RPS com | Variação |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Listagem `?page_size=10` | 22,01 ms | **15,48 ms** | **−29,7 %** | 45,32 | **64,42** | **+42,1 %** |
+| Detalhe `/api/v1/items/310/` | 24,08 ms | **17,07 ms** | **−29,1 %** | 41,44 | **58,43** | **+41,0 %** |
+
+Ciclo de vida observado em tempo real: `MISS` → `HIT` → (60 s) `MISS` por
+expiração de TTL, e `HIT` → `MISS` logo após um `PATCH`, por evento de domínio.
+A decomposição do custo por requisição e as ressalvas de variância estão em
+[`docs/METRICAS_AULA8.md`](docs/METRICAS_AULA8.md); as decisões e alternativas
+consideradas em [`docs/DECISOES_TECNICAS_AULA8.md`](docs/DECISOES_TECNICAS_AULA8.md).
+
+### Exemplos rápidos
+
+```bash
+# Popula o catálogo de medição (idempotente)
+docker compose exec -T api python manage.py seed_demo_catalog
+
+# Ciclo miss -> hit na listagem (X-Cache na resposta)
+curl -i "http://localhost:8000/api/v1/items/?page_size=10" -H "Authorization: Bearer <access_token>"
+curl -i "http://localhost:8000/api/v1/items/?page_size=10" -H "Authorization: Bearer <access_token>"
+
+# Invalidação: o PATCH invalida item:<id> e todas as listas
+curl -X PATCH "http://localhost:8000/api/v1/items/110/" \
+  -H "Authorization: Bearer <access_token>" -H "Content-Type: application/json" \
+  -d '{"name":"Item alterado"}'
+curl -i "http://localhost:8000/api/v1/items/110/" -H "Authorization: Bearer <access_token>"
+
+# Métricas de hit rate (admin)
+curl -X POST "http://localhost:8000/api/v1/cache/stats/" -H "Authorization: Bearer <access_token>"
+curl "http://localhost:8000/api/v1/cache/stats/" -H "Authorization: Bearer <access_token>"
+
+# Chaves e TTL no Redis
+docker compose exec -T redis redis-cli -n 1 --scan --pattern 'synapseshop:1:*'
+docker compose exec -T redis redis-cli -n 1 SMEMBERS "itens:list:indice"
+docker compose exec -T redis redis-cli -n 1 TTL "synapseshop:1:item:110"
+
+# Benchmark (antes/despues, o --path vai no caminho da listagem ou do detalhe)
+python scripts/bench_cache.py --path "/api/v1/items/?page_size=10" --requests 150 --concurrency 1
+
+# Kill-switch: desliga o cache sem mexer no código (X-Cache passa a BYPASS)
+# CACHE_ENABLED=false docker compose up -d --force-recreate api
+
+# Verificação funcional
+python scripts/smoke_test_cache.py
+```
+
+### Operação
+
+| Comandos | Efeito |
+| :--- | :--- |
+| `docker compose exec -T redis redis-cli -n 1 FLUSHALL` | Limpa cache e contadores |
+| `docker compose exec -T redis redis-cli -n 1 INFO memory` | Memória usada pelo Redis |
+| `docker compose logs -f api` | Logs estruturados `cache.lookup` e `dominio.emitido` |
+
+Quando `CACHE_ENABLED=false`, o backend passa a `LocMemCache` e o header
+`X-Cache` responde `BYPASS` — a API segue funcionando, sem cache.
+
+> **Nota:** com o cache no Redis, os contadores do throttling do DRF (Aula 7)
+> passaram a viver no Redis. Ganho de consistência entre workers, com a
+> consequência de que o estado sobrevive a reinícios até expirar a janela.
+
+---
+
+## 12. Variáveis de ambiente
 
 A configuração dos serviços é feita por variáveis de ambiente. O `docker-compose.yml`
 interpola essas variáveis (`${VAR}`) a partir do arquivo `.env` da raiz do projeto e injeta
@@ -443,6 +602,11 @@ então o ambiente também sobe sem `.env` (com os valores de dev).
 | `THROTTLE_ANON` | `20/min` | `api` (`config/settings.py` — throttling de não autenticados) |
 | `THROTTLE_USER` | `200/min` | `api` (`config/settings.py` — throttling de autenticados) |
 | `THROTTLE_LOGIN` | `5/min` | `api` (`config/settings.py` — throttling do login/token) |
+| `REDIS_URL` | `redis://redis:6379/1` (Compose) · `redis://localhost:6379/1` (código) | `api` (`config/settings.py` — cache e throttling) |
+| `CACHE_ENABLED` | `true` | `api` (`config/settings.py` — kill-switch do cache-aside) |
+| `CACHE_TTL_LISTA` | `60` | `api` (`config/settings.py` — TTL da listagem em segundos) |
+| `CACHE_TTL_DETALHE` | `300` | `api` (`config/settings.py` — TTL do detalhe em segundos) |
+| `LOG_LEVEL_SYNAPSESHOP` | `INFO` | `api` (`config/settings.py` — nível dos logs estruturados) |
 | `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD` / `SEED_ADMIN_EMAIL` | `admin` / `admin` / `admin@synapseshop.local` | `api` (`seed_demo_users`) |
 | `SEED_USER_USERNAME` / `SEED_USER_PASSWORD` / `SEED_USER_EMAIL` | `user` / `user` / `user@synapseshop.local` | `api` (`seed_demo_users`) |
 | `POSTGRES_DB` | `synapseshop` | `postgres`, `api`, `inventory` |
@@ -461,7 +625,7 @@ então o ambiente também sobe sem `.env` (com os valores de dev).
 
 ---
 
-## 12. Documentação & Especificações
+## 13. Documentação & Especificações
 
 | Arquivo | Descrição |
 | :--- | :--- |
@@ -478,6 +642,9 @@ então o ambiente também sobe sem `.env` (com os valores de dev).
 | [`docs/METRICAS_AULA6.md`](docs/METRICAS_AULA6.md) | Tempos de execução das transações (Aula 6). |
 | [`docs/DECISOES_TECNICAS_AULA7.md`](docs/DECISOES_TECNICAS_AULA7.md) | Decisões técnicas da Aula 7. |
 | [`docs/METRICAS_AULA7.md`](docs/METRICAS_AULA7.md) | Evidências de autenticação/throttling/acesso (Aula 7). |
+| [`specs/specs_da_aula_8.md`](specs/specs_da_aula_8.md) | Cache-aside com Redis, TTL e invalidação por eventos. |
+| [`docs/DECISOES_TECNICAS_AULA8.md`](docs/DECISOES_TECNICAS_AULA8.md) | Decisões técnicas de chaves, TTL e invalidação (Aula 8). |
+| [`docs/METRICAS_AULA8.md`](docs/METRICAS_AULA8.md) | Latência, RPS, hit rate e ciclo de vida do cache (Aula 8). |
 | [`.env.example`](.env.example) | Modelo versionado das variáveis de ambiente. |
 | [`PROMPTS-TEMPLATE.md`](PROMPTS-TEMPLATE.md) | Template padrão de prompts de IA da squad. |
 | [`docs/CHECKLIST_IA_SAFE.md`](docs/CHECKLIST_IA_SAFE.md) | Checklist de revisão de código gerado por IA. |
