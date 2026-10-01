@@ -266,7 +266,7 @@ para importação no Postman, e o guia de revisão de código gerado por IA est�
 A camada de acesso seguro da API principal usa **JWT stateless** (Bearer) com **dois
 papéis** (`admin` e `user`), **throttling** contra força bruta e **paginação/filtros**
 nos endpoints críticos. Tudo configurável via variáveis de ambiente
-(`JWT_*`, `THROTTLE_*`, `SEED_*` — ver [Seção 11](#11-variáveis-de-ambiente)).
+(`JWT_*`, `THROTTLE_*`, `SEED_*` — ver [Seção 14](#14-variáveis-de-ambiente)).
 
 ### Usuários e papéis
 
@@ -579,7 +579,248 @@ Quando `CACHE_ENABLED=false`, o backend passa a `LocMemCache` e o header
 
 ---
 
-## 12. Variáveis de ambiente
+## 13. Mensageria Assíncrona com RabbitMQ (Aula 9)
+
+O fluxo de pedidos passou a ser assíncrono: a API grava o pedido e publica o
+evento `PedidoCriado` num broker **RabbitMQ**; um *worker* dedicado consome a
+fila, processa a mensagem e persiste o estado no repositório. Reentregas são
+tratadas por **idempotência**, recuo exponencial e, em último caso, **Dead
+Letter Queue**.
+
+### Por que RabbitMQ (e não Kafka)
+
+A spec da Aula 9 abre duas opções. Optou-se pelo **RabbitMQ** porque o requisito
+desta etapa é o tratamento de falha **por mensagem** (reentrega com contagem de
+tentativas e DLQ por fila), e o AMQP resolve isso de forma nativa e declarativa:
+a *dead-letter exchange* é um atributo da fila, sem código extra no produtor. O
+Kafka exigiria reprocessar o log a partir de um offset, traz retenção e
+particionamento que só compensam em arquiteturas de *streaming* eeventos de alta
+volumia, que são escopo das aulas seguintes (pagamento, notificação).
+
+| Critério | RabbitMQ | Kafka |
+| :--- | :--- | :--- |
+| Rota de falha por mensagem | DLX nativa por fila | reprocessamento por offset |
+| Preservação da ordem | por fila (*round-robin*) | por partição |
+| Latência | baixa | maior (*polling* no consumidor) |
+| Volume alto / retenção | limitado | otimizado |
+
+O contrato em `events/contracts.py` já traz `event_type` e `version`, de modo que
+trocar de broker não quebra o formato da mensagem.
+
+### Topologia
+
+```
+                    ┌──────────────┐   publish (topic, persistida)
+  POST /pedidos/ ──▶│pedidos.events│──────────────────────────────┐
+                    └──────────────┘                               │
+                                                                   ▼
+                                                    ┌───────────────────────────┐
+                                                    │ pedidos.pedidocriado      │
+                                                    │ (x-dead-letter-exchange)  │
+                                                    └───────────────────────────┘
+                                                             │ nack sem requeue
+                                                             │ (tentativas esgotadas)
+                                                    ┌────────▼─────────────┐
+                                                    │ pedidos.dlx           │
+                                                    └────────┬─────────────┘
+                                                             ▼
+                                                  ┌──────────────────────┐
+                                                  │ pedidos.pedidocriado │  ← inspeção
+                                                  │        .dlq          │    manual
+                                                  └──────────────────────┘
+```
+
+| Elemento | Tipo | Observação |
+| :--- | :--- | :--- |
+| `pedidos.events` | exchange `topic` | Eventos de domínio do pedido. |
+| `pedidos.pedidocriado` | fila durável | Dead-letter para `pedidos.dlx`; `prefetch=1`. |
+| `pedidos.dlx` | exchange `direct` | Roteia mensagens mortas. |
+| `pedidos.pedidocriado.dlq` | fila durável | Mensagens mortas, para inspeção. |
+
+### Contrato da mensagem `PedidoCriado`
+
+Definido e **validado** em `events/contracts.py`. O envelope JSON:
+
+```json
+{
+  "event_id": "0f3c...uuid",
+  "event_type": "PedidoCriado",
+  "version": "1.0",
+  "occurred_at": "2026-09-30T23:52:29.117970Z",
+  "correlation_id": "b7a1...uuid",
+  "idempotency_key": "pedido-2026-0001",
+  "dados": {
+    "pedido_id": 15,
+    "usuario_id": 2,
+    "total": "399.80",
+    "status": "PENDENTE",
+    "itens": [
+      {"item_id": 622, "quantidade": 2, "preco_unitario": "199.90"}
+    ]
+  }
+}
+```
+
+Regras de contrato:
+
+- **Discriminantes** — `event_type` e `version` são validados na recepção; evento
+  desconhecido ou de versão incompatível é rejeitado **antes** de qualquer escrita.
+- **`idempotency_key`** — chave de negócio do pedido, **obrigatória**, até 64
+  caracteres (limite do índice único). É o que garante idempotência ponta a ponta.
+- **Monetário como `str`** — `total` e `preco_unitario` viajam como texto; `float`
+  no JSON introduz erro de arredondamento.
+- **`correlation_id`** — identificador que atravessa produtor e consumidor,
+  permitindo correlacionar logs e mensagens.
+- **Preço congelado** — o cliente informa apenas `item_id` e `quantidade`; preço
+  e total são calculados no servidor a partir do catálogo, para que o evento
+  descreva o pedido como foi vendido.
+
+### Idempotência
+
+Duas camadas, com a mesma chave e o mesmo TTL:
+
+| Camada | Onde | Papel |
+| :--- | :--- | :--- |
+| `EventoProcessado` (PostgreSQL) | `services/idempotencia.py` | Fonte durável; unicidade `(evento, idempotency_key)` resolve corrida entre consumidores. |
+| Redis (`evento:processado:<evento>:<chave>`) | mesmo módulo | Caminho rápido, com TTL nativo. |
+
+Pontos-chave da regra:
+
+- **No produtor** — repetir a mesma `idempotency_key` devolve o **mesmo pedido**
+  com **200**, sem criar outro e sem publicar outro evento.
+- **No consumidor** — a chave é registrada **depois** do processamento
+  bem-sucedido, nunca antes: reservar a chave antes descartaria uma reentrega cujo
+  processamento falhou, entregando o pedido com efeito zero.
+- **TTL** — `IDEMPOTENCIA_TTL_SEGUNDOS` (padrão 24 h). As chaves expiradas são
+  removidas na subida do worker para a tabela não crescer sem limite.
+- **Efeito idempotente** — a transição `PENDENTE` → `PROCESSANDO` só ocorre se o
+  pedido ainda estiver `PENDENTE`, então mesmo uma corrida de reentregas não
+  duplica o efeito.
+
+### Reentrega, recuo e DLQ
+
+| Parâmetro | Default | Significado |
+| :--- | ---: | :--- |
+| `MENSAGERIA_MAX_RETRIES` | `3` | Reentregas **além** da primeira tentativa (4 tentativas no total). |
+| `MENSAGERIA_BACKOFF_BASE_MS` | `250` | Base do recuo exponencial. |
+| `MENSAGERIA_BACKOFF_MAX_MS` | `5000` | Teto do recuo. |
+| `RABBITMQ_PREFETCH` | `1` | Uma mensagem por vez; nada se perde em requeue. |
+
+Política aplicada, com o consumidor em `ack` manual:
+
+1. Sucesso → `ack`.
+2. Falha com `tentativa < MAX_RETRIES` → republica o mesmo corpo com
+   `x-retry-count` incrementado, aguarda o recuo exponencial
+   (`250 ms → 500 ms → 1000 ms → …`, limitado por `BACKOFF_MAX`) e então confirma
+   a original. Se o broker **não** confirmar a republicação, a original é
+   reenfileirada (`nack requeue=true`) em vez de ser perdida.
+3. `tentativa >= MAX_RETRIES` → `nack` sem *requeue*; o broker encaminha a
+   mensagem para `pedidos.pedidocriado.dlq` pela *dead-letter exchange*. Não há
+   consumo automático da DLQ: a decisão de reprocessar é humana.
+
+Corpo ilegível (JSON inválido) não tem como ser reprocessado e vai direto para a
+DLQ, sem consumir tentativas.
+
+### Estrutura
+
+| Caminho | Responsabilidade |
+| :--- | :--- |
+| `events/contracts.py` | Contrato `PedidoCriado` (serialização e validação). |
+| `services/messaging.py` | Topologia, produtor, consumidor com *ack* manual, reentrega e DLQ. |
+| `services/idempotencia.py` | Chave de deduplicação com TTL (Redis + PostgreSQL). |
+| `api/views.py` | `PedidoCreateView` (produtor) e `PedidoDetailView` (observabilidade). |
+| `workers/pedido_worker.py` | Consumidor: valida o contrato, deduplica e persiste o estado. |
+| `scripts/smoke_test_mensageria.py` | Verificação do fluxo, da idempotência e da DLQ. |
+
+### Endpoints
+
+| Método | Rota | Ação | Status |
+| :--- | :--- | :--- | :--- |
+| POST | `/api/v1/pedidos/` | Cria pedido e publica `PedidoCriado` | 201 / 200 / 400 / 401 |
+| GET | `/api/v1/pedidos/{id}/` | Detalha pedido (dono ou admin) | 200 / 404 |
+
+A criação do pedido exige autenticação (qualquer papel) — diferentemente do
+catálogo, em que escrita é `admin`-only, porque o pedido pertence a quem o cria.
+
+`201` traz `evento_publicado: true`. Se o pedido for commitado mas o broker
+recusar o evento, a resposta é `202` com `evento_publicado: false`: o dado está no
+banco e a falha fica registrada em log, sem mentir sobre o estado.
+
+### Observabilidade
+
+Logs estruturados JSON com `duracao_ms` em cada etapa:
+
+```json
+{"evento": "mensageria.publicado", "idempotency_key": "pedido-smoke-1790812348", "duracao_ms": 3.91}
+{"evento": "mensageria.consumido", "idempotency_key": "pedido-smoke-1790812348", "resultado": "ok", "duracao_ms": 12.4}
+{"evento": "worker.pedido.duplicado", "pedido_id": 15, "resultado": "duplicado", "duracao_ms": 0.35}
+{"evento": "mensageria.reentrega", "tentativa": 0, "proxima_tentativa": 1, "espera_ms": 250.0}
+{"evento": "mensageria.dlq", "tentativa": 3, "dlq": "pedidos.pedidocriado.dlq"}
+```
+
+### Exemplos rápidos
+
+```bash
+# Token e criação do pedido (o evento é publicado no mesmo passo)
+TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/token/ \
+  -H "Content-Type: application/json" -d '{"username":"user","password":"user"}' \
+  | python -c "import sys,json;print(json.load(sys.stdin)['access'])")
+
+curl -X POST http://localhost:8000/api/v1/pedidos/ \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"idempotency_key":"pedido-2026-0001","itens":[{"item_id":1,"quantidade":2}]}'
+
+# O worker leva o pedido de PENDENTE para PROCESSANDO
+curl http://localhost:8000/api/v1/pedidos/15/ -H "Authorization: Bearer $TOKEN"
+
+# Repetir a chave devolve o mesmo pedido, com 200
+curl -i -X POST http://localhost:8000/api/v1/pedidos/ \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"idempotency_key":"pedido-2026-0001","itens":[{"item_id":1,"quantidade":2}]}'
+
+# Logs de produtor e consumidor
+docker compose logs -f api pedido-worker
+
+# UI de gerenciamento do broker (guest/guest)
+# http://localhost:15672
+
+# Contagem de mensagens nas filas
+docker compose exec -T rabbitmq rabbitmqctl list_queues name messages
+```
+
+### Operação
+
+| Comando | Efeito |
+| :--- | :--- |
+| `PEDIDO_WORKER_FALHA_IDEM_KEYS="pedido-dlq-*" docker compose up -d --force-recreate pedido-worker` | Worker rejeita pedidos cujo padrão casa — simula erro para validar reentrega/DLQ |
+| `docker compose exec -T rabbitmq rabbitmqctl purge_queue pedidos.pedidocriado.dlq` | Limpa a DLQ depois da inspeção |
+| `docker compose exec -T rabbitmq rabbitmqctl list_queues name messages` | Estado das filas |
+| `docker compose logs -f pedido-worker` | Logs do consumidor |
+| `MESSAGERIA_ENABLED=false docker compose up -d --force-recreate api` | Kill-switch: grava o pedido sem publicar (202) |
+
+Com `MESSAGERIA_ENABLED=false` a API segue funcionando: o pedido é persistido e
+a resposta é `202` com `evento_publicado: false`, o que isola o custo da
+sincronia ponta a ponta em medições.
+
+### Verificação funcional
+
+```bash
+# Fluxo feliz + idempotência (o cenário de DLQ é pulado sem o modo forçado)
+python scripts/smoke_test_mensageria.py
+
+# Com o cenário de DLQ ativo
+PEDIDO_WORKER_FALHA_IDEM_KEYS="pedido-dlq-*" docker compose up -d --force-recreate pedido-worker
+python scripts/smoke_test_mensageria.py
+```
+
+Resultado da validação: **23 PASS / 0 FAIL**, cobrindo publicação, contrato,
+consumo com persistência do estado, idempotência no produtor, idempotência na
+reentrega (o teste republica o mesmo evento pela Management API) e chegada à DLQ
+com o pedido ainda em `PENDENTE`.
+
+---
+
+## 14. Variáveis de ambiente
 
 A configuração dos serviços é feita por variáveis de ambiente. O `docker-compose.yml`
 interpola essas variáveis (`${VAR}`) a partir do arquivo `.env` da raiz do projeto e injeta
@@ -606,7 +847,18 @@ então o ambiente também sobe sem `.env` (com os valores de dev).
 | `CACHE_ENABLED` | `true` | `api` (`config/settings.py` — kill-switch do cache-aside) |
 | `CACHE_TTL_LISTA` | `60` | `api` (`config/settings.py` — TTL da listagem em segundos) |
 | `CACHE_TTL_DETALHE` | `300` | `api` (`config/settings.py` — TTL do detalhe em segundos) |
-| `LOG_LEVEL_SYNAPSESHOP` | `INFO` | `api` (`config/settings.py` — nível dos logs estruturados) |
+| `RABBITMQ_HOST` | `rabbitmq` (Compose) · `localhost` (código) | `api`, `pedido-worker` (`config/settings.py`) |
+| `RABBITMQ_PORT` | `5672` | `api`, `pedido-worker` |
+| `RABBITMQ_USER` / `RABBITMQ_PASSWORD` | `guest` / `guest` | `api`, `pedido-worker` |
+| `RABBITMQ_VHOST` | `/` | `api`, `pedido-worker` |
+| `MENSAGERIA_ENABLED` | `true` | `api` (`config/settings.py` — kill-switch da publicação) |
+| `IDEMPOTENCIA_TTL_SEGUNDOS` | `86400` | `api`, `pedido-worker` (janela de deduplicação) |
+| `MENSAGERIA_MAX_RETRIES` | `3` | `pedido-worker` (reentregas além da 1ª tentativa) |
+| `MENSAGERIA_BACKOFF_BASE_MS` | `250` | `pedido-worker` (base do recuo exponencial) |
+| `MENSAGERIA_BACKOFF_MAX_MS` | `5000` | `pedido-worker` (teto do recuo) |
+| `RABBITMQ_PREFETCH` | `1` | `pedido-worker` (mensagens em voo por consumidor) |
+| `PEDIDO_WORKER_FALHA_IDEM_KEYS` | (vazio) | `pedido-worker` (padrões `fnmatch` de `idempotency_key` para simular erro) |
+| `LOG_LEVEL_SYNAPSESHOP` | `INFO` | `api`, `pedido-worker` (nível dos logs estruturados) |
 | `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD` / `SEED_ADMIN_EMAIL` | `admin` / `admin` / `admin@synapseshop.local` | `api` (`seed_demo_users`) |
 | `SEED_USER_USERNAME` / `SEED_USER_PASSWORD` / `SEED_USER_EMAIL` | `user` / `user` / `user@synapseshop.local` | `api` (`seed_demo_users`) |
 | `POSTGRES_DB` | `synapseshop` | `postgres`, `api`, `inventory` |
@@ -645,6 +897,9 @@ então o ambiente também sobe sem `.env` (com os valores de dev).
 | [`specs/specs_da_aula_8.md`](specs/specs_da_aula_8.md) | Cache-aside com Redis, TTL e invalidação por eventos. |
 | [`docs/DECISOES_TECNICAS_AULA8.md`](docs/DECISOES_TECNICAS_AULA8.md) | Decisões técnicas de chaves, TTL e invalidação (Aula 8). |
 | [`docs/METRICAS_AULA8.md`](docs/METRICAS_AULA8.md) | Latência, RPS, hit rate e ciclo de vida do cache (Aula 8). |
+| [`specs/specs_da_aula_9.md`](specs/specs_da_aula_9.md) | Mensageria assíncrona e filas com RabbitMQ. |
+| [`docs/DECISOES_TECNICAS_AULA9.md`](docs/DECISOES_TECNICAS_AULA9.md) | Decisões de broker, contrato, idempotência e política de falha (Aula 9). |
+| [`docs/METRICAS_AULA9.md`](docs/METRICAS_AULA9.md) | Tempos de execução, tentativas e evidências da DLQ (Aula 9). |
 | [`.env.example`](.env.example) | Modelo versionado das variáveis de ambiente. |
 | [`PROMPTS-TEMPLATE.md`](PROMPTS-TEMPLATE.md) | Template padrão de prompts de IA da squad. |
 | [`docs/CHECKLIST_IA_SAFE.md`](docs/CHECKLIST_IA_SAFE.md) | Checklist de revisão de código gerado por IA. |
