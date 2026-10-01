@@ -1,0 +1,1 @@
+"""Contratos de evento da Camada de Mensageria (Aula 9)."""

@@ -1,11 +1,24 @@
+import json
+import logging
+from decimal import Decimal
+from uuid import uuid4
+
+from django.conf import settings
+from django.db import IntegrityError, transaction
 from django.http import JsonResponse
 from rest_framework import permissions, viewsets
 from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from api.serializers import CategorySerializer, ItemSerializer
-from repositories.models import Category, Item, User
+from api.serializers import (
+    CategorySerializer,
+    ItemSerializer,
+    PedidoCreateSerializer,
+    PedidoSerializer,
+)
+from events.contracts import EventoPedidoCriado, ItemPedidoCriado
+from repositories.models import Category, Item, Pedido, PedidoItem, User
 from services import cache as cache_service
 from services.events import (
     CATEGORIA_ATUALIZADA,
@@ -16,6 +29,9 @@ from services.events import (
     ITEM_REMOVIDO,
     emitir_apos_commit,
 )
+from services.messaging import MensageriaIndisponivel, ProdutorPedidoCriado
+
+logger_pedidos = logging.getLogger("synapseshop.pedidos")
 
 
 def health(request):
@@ -147,3 +163,166 @@ class CacheStatsView(APIView):
     def post(self, request):
         cache_service.reset_metricas()
         return Response(cache_service.metricas())
+
+
+def _log_pedido(nome_evento: str, **campos) -> None:
+    """Log estruturado do produtor, no mesmo formato dos logs da Aula 8."""
+    logger_pedidos.info(
+        json.dumps(
+            {"evento": nome_evento, **{k: v for k, v in campos.items() if v is not None}},
+            ensure_ascii=False,
+        )
+    )
+
+
+class PedidoCreateView(APIView):
+    """Produtor do evento ``PedidoCriado`` (Aula 9).
+
+    Grava o pedido e publica o evento **depois do commit** — publicar antes
+    deixaria o consumidor CHDando uma mensagem de um pedido que pode ainda ter
+    sido revertido por uma falha na transação.
+
+    Idempotência no produtor: repetir a mesma ``idempotency_key`` devolve o
+    pedido já existente com **200**, sem novo pedido e sem novo evento.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        serializer = PedidoCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        dados = serializer.validated_data
+
+        idempotency_key = dados["idempotency_key"] or f"pedido-{uuid4().hex}"
+        existente = Pedido.objects.filter(idempotency_key=idempotency_key).first()
+        if existente is not None:
+            _log_pedido(
+                "pedido.duplicado",
+                idempotency_key=idempotency_key,
+                pedido_id=existente.pk,
+                usuario_id=existente.usuario_id,
+            )
+            return Response(PedidoSerializer(existente).data, status=200)
+
+        # Preço e total são calculados no servidor a partir do catálogo ativo:
+        # o cliente informa apenas o item e a quantidade.
+        itens_catalogo = {
+            item.pk: item
+            for item in Item.objects.filter(
+                pk__in=[linha["item_id"] for linha in dados["itens"]]
+            )
+        }
+        total = Decimal("0.00")
+        for linha in dados["itens"]:
+            total += itens_catalogo[linha["item_id"]].price * linha["quantidade"]
+
+        try:
+            with transaction.atomic():
+                pedido = Pedido.objects.create(
+                    usuario=request.user,
+                    status=Pedido.Status.PENDENTE,
+                    total=total,
+                    idempotency_key=idempotency_key,
+                )
+                PedidoItem.objects.bulk_create(
+                    [
+                        PedidoItem(
+                            pedido=pedido,
+                            item=itens_catalogo[linha["item_id"]],
+                            quantidade=linha["quantidade"],
+                            preco_unitario=itens_catalogo[linha["item_id"]].price,
+                        )
+                        for linha in dados["itens"]
+                    ]
+                )
+        except IntegrityError:
+            # Duas requisições com a mesma chave chegaram ao mesmo tempo: a
+            # constraint única do banco decide, e a perdedora devolve o pedido.
+            existente = Pedido.objects.filter(idempotency_key=idempotency_key).first()
+            if existente is None:
+                return Response(
+                    {"detail": "Conflito ao registrar o pedido."}, status=409
+                )
+            return Response(PedidoSerializer(existente).data, status=200)
+
+        itens_pedido = list(pedido.itens.all())
+        _log_pedido(
+            "pedido.criado",
+            pedido_id=pedido.pk,
+            usuario_id=pedido.usuario_id,
+            idempotency_key=idempotency_key,
+            total=str(pedido.total),
+            itens=len(itens_pedido),
+        )
+
+        evento = EventoPedidoCriado(
+            idempotency_key=idempotency_key,
+            pedido_id=pedido.pk,
+            usuario_id=pedido.usuario_id,
+            total=pedido.total,
+            status=pedido.status,
+            itens=[
+                ItemPedidoCriado(
+                    item_id=linha.item_id,
+                    quantidade=linha.quantidade,
+                    preco_unitario=linha.preco_unitario,
+                )
+                for linha in itens_pedido
+            ],
+            correlation_id=str(uuid4()),
+        )
+        publicado = _publicar_pedido_criado(evento, idempotency_key)
+
+        corpo = PedidoSerializer(pedido).data
+        if not publicado:
+            # O pedido está no banco mas o broker não aceitou o evento. 202
+            # informa que o processamento ainda vai acontecer (a fila pode
+            # ser reprocessada pela chave de idempotência) sem prometer estado.
+            return Response({**corpo, "evento_publicado": False}, status=202)
+        return Response({**corpo, "evento_publicado": True}, status=201)
+
+
+class PedidoDetailView(APIView):
+    """Consulta o estado de um pedido — a forma de observar o efeito do consumidor.
+
+    O pedido pertence a quem o criou; o papel ``admin`` enxerga qualquer um.
+    Existe para tornar observável a transição ``PENDENTE`` -> ``PROCESSANDO``
+    feita pelo worker, sem duplicar o ViewSet de escrita.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, pk):
+        pedido = Pedido.objects.filter(pk=pk).first()
+        if pedido is None:
+            return Response({"detail": "Pedido não encontrado."}, status=404)
+        eh_admin = getattr(request.user, "role", None) == User.Roles.ADMIN
+        if not eh_admin and pedido.usuario_id != request.user.id:
+            return Response({"detail": "Pedido não encontrado."}, status=404)
+        return Response(PedidoSerializer(pedido).data)
+
+
+def _publicar_pedido_criado(evento: EventoPedidoCriado, idempotency_key: str) -> bool:
+    """Publica o evento. Devolve ``False`` quando o broker está fora do ar.
+
+    Falha de broker não pode derrubar a criação do pedido (o dado já está
+    commitado), então o desfecho é registrado em log e sinalizado na resposta.
+    """
+    if not settings.MESSAGERIA_ENABLED:
+        _log_pedido(
+            "pedido.publicacao_ignorada",
+            idempotency_key=idempotency_key,
+            motivo="MESSAGERIA_ENABLED=false",
+        )
+        return False
+    try:
+        with ProdutorPedidoCriado() as produtor:
+            produtor.publicar(evento.to_dict(), idempotency_key)
+        return True
+    except MensageriaIndisponivel as exc:
+        _log_pedido(
+            "pedido.publicacao_falhou",
+            idempotency_key=idempotency_key,
+            erro=str(exc),
+        )
+        return False

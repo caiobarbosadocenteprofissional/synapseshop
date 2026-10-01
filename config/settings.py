@@ -144,6 +144,54 @@ SIMPLE_JWT = {
     "AUTH_TOKEN_CLASSES": ("rest_framework_simplejwt.tokens.AccessToken",),
 }
 
+# Aula 9: mensageria assíncrona com RabbitMQ (Camada 5 — Dados & Mensageria).
+# O Compose provisiona o serviço `rabbitmq` e injeta RABBITMQ_*; o mesmo bloco
+# é lido pela API (produtor) e pelo `pedido-worker` (consumidor).
+# MENSAGERIA_ENABLED é o kill-switch: com `false` o pedido é gravado e nenhum
+# evento é publicado, o que permite medir o custo da sincronia ponta a ponta.
+MESSAGERIA_ENABLED = os.environ.get("MESSAGERIA_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
+RABBITMQ_HOST = os.environ.get("RABBITMQ_HOST", "rabbitmq")
+RABBITMQ_PORT = int(os.environ.get("RABBITMQ_PORT", "5672"))
+RABBITMQ_USER = os.environ.get("RABBITMQ_USER", "guest")
+RABBITMQ_PASSWORD = os.environ.get("RABBITMQ_PASSWORD", "guest")
+RABBITMQ_VHOST = os.environ.get("RABBITMQ_VHOST", "/")
+RABBITMQ_EXCHANGE = os.environ.get("RABBITMQ_EXCHANGE", "pedidos.events")
+RABBITMQ_FILA_PEDIDO_CRIADO = os.environ.get(
+    "RABBITMQ_FILA_PEDIDO_CRIADO", "pedidos.pedidocriado"
+)
+RABBITMQ_FILA_PEDIDO_CRIADO_DLQ = os.environ.get(
+    "RABBITMQ_FILA_PEDIDO_CRIADO_DLQ", "pedidos.pedidocriado.dlq"
+)
+RABBITMQ_DLX = os.environ.get("RABBITMQ_DLX", "pedidos.dlx")
+RABBITMQ_ROUTING_KEY_PEDIDO_CRIADO = os.environ.get(
+    "RABBITMQ_ROUTING_KEY_PEDIDO_CRIADO", "pedido.criado"
+)
+RABBITMQ_PREFETCH = int(os.environ.get("RABBITMQ_PREFETCH", "1"))
+
+# Política de reentrega do consumidor: attempts = 1 + MAX_RETRIES. Depois de
+# esgotar as tentativas a mensagem é morta (nack sem requeue) e o broker a
+# encaminha para a DLQ através da dead-letter exchange.
+MENSAGERIA_MAX_RETRIES = int(os.environ.get("MENSAGERIA_MAX_RETRIES", "3"))
+MENSAGERIA_BACKOFF_BASE_MS = int(os.environ.get("MENSAGERIA_BACKOFF_BASE_MS", "250"))
+MENSAGERIA_BACKOFF_MAX_MS = int(os.environ.get("MENSAGERIA_BACKOFF_MAX_MS", "5000"))
+
+# Prazo de validade da chave de deduplicação (idempotência do consumidor).
+IDEMPOTENCIA_TTL_SEGUNDOS = int(os.environ.get("IDEMPOTENCIA_TTL_SEGUNDOS", "86400"))
+
+# Ganchos de teste para simular erro forçado e validar reentrega + DLQ sem
+# alterar o código: padrões (fnmatch) de idempotency_key que o worker rejeita.
+# Vazio em operação normal. Ex.: PEDIDO_WORKER_FALHA_IDEM_KEYS=pedido-dlq-*
+PEDIDO_WORKER_FALHA_IDEM_KEYS = [
+    padrao.strip()
+    for padrao in os.environ.get("PEDIDO_WORKER_FALHA_IDEM_KEYS", "").split(",")
+    if padrao.strip()
+]
+
 # Aula 8: logs estruturados (JSON) do ciclo de vida do cache e dos eventos de
 # domínio. As mensagens já são JSON em services/, por isso o formatador é
 # "%(message)s".

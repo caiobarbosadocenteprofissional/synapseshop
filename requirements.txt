@@ -10,3 +10,6 @@ djangorestframework-simplejwt==5.5.*
 psycopg[binary]==3.3.*
 # Aula 8: cache-aside com Redis (django-redis sobre o framework de cache do Django).
 django-redis==7.0.*
+# Aula 9: cliente AMQP da mensageria assíncrona (RabbitMQ) — produtor na API e
+# consumidor no `pedido-worker`.
+pika==1.3.*
