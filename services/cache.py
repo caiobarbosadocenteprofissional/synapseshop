@@ -1,4 +1,4 @@
-"""Camada de cache-aside do catálogo (Aula 8).
+"""Camada de cache-aside do catálogo e do pedido (Aulas 8 e 11).
 
 Implementa o padrão cache-aside sobre o Redis provisionado pelo Compose:
 
@@ -14,12 +14,19 @@ Nomenclatura de chaves (padrão ``entidade:recurso[:variante]`` da spec):
   filtro para outro (TTL de ``CACHE_TTL_LISTA``).
 - ``item:<id>`` — detalhe de um item, consulta mais pesada e estável
   (TTL de ``CACHE_TTL_DETALHE``).
+- ``pedido:<id>`` — detalhe do pedido, introduzido na Aula 11
+  (TTL de ``CACHE_TTL_PEDIDO``).
 
 Cada variante é registrada em um índice no Redis (``itens:list:indice`` e
 ``itens:detalhe:indice``) para que a invalidação por evento de domínio apague
 todas as combinações sem varrer o keyspace com ``KEYS``/``SCAN``. As métricas de
 hit rate são contadas com ``INCR`` no próprio Redis, ficando corretas mesmo com
 mais de um processo da API.
+
+O detalhe do pedido **não** usa índice: há uma chave por pedido, e a invalidação
+sabe exatamente qual apagar. Registrar a chave em um índice custaria uma escrita
+a cada leitura para ganhar a possibilidade de varrer todos os pedidos — que
+ninguém faz.
 """
 
 import hashlib
@@ -35,6 +42,7 @@ logger = logging.getLogger("synapseshop.cache")
 # Nomenclatura de chaves de cache (Aula 8).
 PREFIXO_LISTA_ITENS = "itens:list"
 PREFIXO_ITEM = "item"
+PREFIXO_PEDIDO = "pedido"
 INDICE_LISTA_ITENS = "itens:list:indice"
 INDICE_ITENS_DETALHE = "itens:detalhe:indice"
 INDICE_METRICAS = "cache:stats"
@@ -42,9 +50,11 @@ INDICE_METRICAS = "cache:stats"
 # Rótulos de métrica por endpoint instrumentado.
 ENDPOINT_LISTA_ITENS = "itens:list"
 ENDPOINT_DETALHE_ITEM = "item:detalhe"
+ENDPOINT_DETALHE_PEDIDO = "pedido:detalhe"
 
 RESULTADO_HIT = "HIT"
 RESULTADO_MISS = "MISS"
+RESULTADO_AUSENTE = "AUSENTE"
 
 # Query params que alteram o resultado da listagem e, portanto, a chave do cache.
 PARAMETROS_RELEVANTES = (
@@ -88,6 +98,10 @@ def _chave_lista_itens(query_params) -> str:
 
 def _chave_item(item_id) -> str:
     return f"{PREFIXO_ITEM}:{item_id}"
+
+
+def _chave_pedido(pedido_id) -> str:
+    return f"{PREFIXO_PEDIDO}:{pedido_id}"
 
 
 def _contar(endpoint: str, resultado: str) -> None:
@@ -149,6 +163,12 @@ def _cache_aside(chave: str, endpoint: str, ttl: int, produtor):
         return dados, RESULTADO_HIT
 
     dados = produtor()
+    if dados is None:
+        # Ausência não é cacheada: guardar "não existe" transformaria um 404 em
+        # HIT por 60 s, e um registro criado logo depois ficaria invisível.
+        _contar(endpoint, RESULTADO_MISS)
+        _log_lookup(endpoint, chave, "AUSENTE", ttl, "postgresql")
+        return None, "AUSENTE"
     try:
         cache.set(chave, dados, timeout=ttl)
     except Exception:  # noqa: BLE001 - falha de cache não derruba a requisição
@@ -219,10 +239,43 @@ def invalidar_detalhes_itens() -> int:
     return _invalidar_indice(INDICE_ITENS_DETALHE)
 
 
+def get_pedido(pedido_id, produtor):
+    """Cache-aside do detalhe do pedido (TTL `CACHE_TTL_PEDIDO`).
+
+    O TTL é curto **por construção**: o estado do pedido muda por eventos
+    processes em outras máquinas (pagamento na API, notificação no worker), e
+    embora quem grava invalide a chave, o TTL é o que limita o estrago quando a
+    invalidação não acontece.
+    """
+    return _cache_aside(
+        _chave_pedido(pedido_id),
+        ENDPOINT_DETALHE_PEDIDO,
+        settings.CACHE_TTL_PEDIDO,
+        produtor,
+    )
+
+
+def invalidar_pedido(pedido_id) -> bool:
+    """Invalida o detalhe de um pedido. Chamado por **qualquer** processo que o altere.
+
+    É esta função que fecha o acordo da Aula 11: a chave vive no Redis
+    compartilhado, então a API que grava o pagamento e o worker que grava a
+    notificação alcançam a mesma chave — não há cache por processo para ficar
+    inconsistente.
+    """
+    if not cache_ativo():
+        return False
+    chave = _chave_pedido(pedido_id)
+    removido = bool(cache.delete(chave))
+    _log_lookup(ENDPOINT_DETALHE_PEDIDO, chave, "INVALIDADO", 0, "gravacao_do_pedido")
+    return removido
+
+
 def ttls() -> dict:
     return {
         ENDPOINT_LISTA_ITENS: settings.CACHE_TTL_LISTA,
         ENDPOINT_DETALHE_ITEM: settings.CACHE_TTL_DETALHE,
+        ENDPOINT_DETALHE_PEDIDO: settings.CACHE_TTL_PEDIDO,
     }
 
 
@@ -259,6 +312,7 @@ def metricas() -> dict:
         "chaves": {
             "listagem": f"{PREFIXO_LISTA_ITENS}:<assinatura>",
             "detalhe": f"{PREFIXO_ITEM}:<id>",
+            "pedido": f"{PREFIXO_PEDIDO}:<id>",
         },
         "endpoints": endpoints,
         "total_hits": total_hits,

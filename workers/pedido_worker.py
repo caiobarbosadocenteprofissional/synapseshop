@@ -1,4 +1,4 @@
-"""Worker consumidor do evento ``PedidoCriado`` (Aula 9).
+"""Worker consumidor do evento ``PedidoCriado`` (Aulas 9 a 11).
 
 Roda como processo separado da API (``docker compose up pedido-worker``) e é o
 lado *consumidor* do fluxo producer/consumer da Camada 5.
@@ -15,9 +15,17 @@ O que ele faz ao receber uma mensagem:
    reconhecida.
 
 Se qualquer passo levantar exceção, a exceção sobe para
-``services.messaging.ConsumidorPedidoCriado``, que aplica a política de
-reentrega (recuo exponencial) e, ao esgotrar as tentativas, deixa a mensagem
-morrer para a DLQ.
+``services.messaging.ConsumidorEvento``, que aplica a política de reentrega
+(recuo exponencial) e, ao esgotar as tentativas, deixa a mensagem morrer para a
+DLQ.
+
+Este worker não sabe em qual broker está: ``services/messaging.py`` escolhe o
+transporte (RabbitMQ na Aula 9, Kafka na Aula 10) e expõe o mesmo par
+consumidor/produtor. É por isso que o handler, a deduplicação e a transição de
+estado são idênticos nos dois casos — inclusive na garantia de idempotência, que
+é o que torna a semântica de *at-least-once* do Kafka segura. Na Aula 11 o
+mesmo par ``ConsumidorEvento`` é usado pelo ``notificacao-worker``: o que muda é
+a topologia e o handler, não a classe.
 
 Simulação de erro para validar reentrega e DLQ (Aula 9, DoD "erro forçado"):
 ``PEDIDO_WORKER_FALHA_IDEM_KEYS=pedido-dlq-*`` faz o worker rejeitar apenas os
@@ -48,10 +56,12 @@ from django.conf import settings  # noqa: E402
 from django.db import transaction  # noqa: E402
 from django.utils import timezone  # noqa: E402
 
-from events.contracts import ContratoInvalido, EventoPedidoCriado  # noqa: E402
+from events.contracts import ContratoInvalido, EVENTO_PEDIDO_CRIADO, EventoPedidoCriado  # noqa: E402
+from events.topology import topologia_de  # noqa: E402
 from repositories.models import Pedido  # noqa: E402
 from services import idempotencia  # noqa: E402
-from services.messaging import ConsumidorPedidoCriado  # noqa: E402
+from services.events import PEDIDO_EM_PROCESSAMENTO, emitir_apos_commit  # noqa: E402
+from services.messaging import ConsumidorEvento  # noqa: E402
 
 logger = logging.getLogger("synapseshop.worker")
 
@@ -124,6 +134,10 @@ def processar_pedido_criado(bruto: Dict[str, Any], tentativa: int) -> None:
             pedido.status = Pedido.Status.PROCESSANDO
             pedido.processado_em = timezone.now()
             pedido.save(update_fields=["status", "processado_em", "updated_at"])
+            # O estado do pedido mudou em outro processo: o cache do detalhe,
+            # que é compartilhado no Redis, tem de ser invalidado aqui para que
+            # o próximo GET /api/v1/pedidos/<id>/ não sirva o estado antigo.
+            emitir_apos_commit(PEDIDO_EM_PROCESSAMENTO, pedido_id=pedido.pk)
 
     duracao_ms = round((time.perf_counter() - inicio) * 1000, 3)
     idempotencia.registrar(
@@ -144,24 +158,55 @@ def processar_pedido_criado(bruto: Dict[str, Any], tentativa: int) -> None:
     )
 
 
+def _destino_log() -> dict:
+    """Nome da fila/tópico de trabalho e da DLQ, conforme o broker ativo.
+
+    O log de subida precisa dizer onde a mensagem entra e onde a morta sai, e os
+    dois nomes são diferentes entre AMQP e Kafka. A política (tentativas, TTL) é
+    a mesma e vem sempre das mesmas settings; os nomes vêm da topologia do evento,
+    que este worker consome — o mesmo par de ``main()``.
+    """
+    topologia = topologia_de(EVENTO_PEDIDO_CRIADO)
+    if settings.MENSAGERIA_BROKER == "kafka":
+        return {
+            "broker": "kafka",
+            "evento": topologia.evento,
+            "topico": topologia.topico,
+            "dlq": topologia.dlq,
+            "grupo": topologia.grupo,
+            "particoes": settings.KAFKA_PARTICOES,
+        }
+    return {
+        "broker": "rabbitmq",
+        "evento": topologia.evento,
+        "fila": topologia.fila,
+        "dlq": topologia.fila_dlq,
+        "prefetch": settings.RABBITMQ_PREFETCH,
+    }
+
+
 def main() -> None:
-    consumidor = ConsumidorPedidoCriado(processar_pedido_criado)
+    consumidor = ConsumidorEvento(
+        processar_pedido_criado,
+        topologia_de(EVENTO_PEDIDO_CRIADO),
+        client_id="synapseshop-pedido-worker",
+    )
     # As chaves de deduplicação têm prazo de validade: as expiradas são
     # descartadas na subida do worker para a tabela não crescer sem limite.
     expiradas = idempotencia.limpar_expirados()
     _log(
         "worker.iniciado",
-        fila=settings.RABBITMQ_FILA_PEDIDO_CRIADO,
-        dlq=settings.RABBITMQ_FILA_PEDIDO_CRIADO_DLQ,
+        worker="pedido",
         max_retries=settings.MENSAGERIA_MAX_RETRIES,
         idempotencia_ttl=settings.IDEMPOTENCIA_TTL_SEGUNDOS,
         chaves_expiradas_removidas=expiradas,
         falha_forcada=bool(settings.PEDIDO_WORKER_FALHA_IDEM_KEYS),
+        **_destino_log(),
     )
     try:
         consumidor.executar()
     finally:
-        _log("worker.encerrado")
+        _log("worker.encerrado", worker="pedido")
 
 
 if __name__ == "__main__":

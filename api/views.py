@@ -8,18 +8,25 @@ from django.db import IntegrityError, transaction
 from django.http import JsonResponse
 from rest_framework import permissions, viewsets
 from rest_framework.filters import OrderingFilter, SearchFilter
+from rest_framework.generics import ListAPIView
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from api.serializers import (
     CategorySerializer,
     ItemSerializer,
+    NotificacaoSerializer,
+    PagamentoCreateSerializer,
+    PagamentoSerializer,
     PedidoCreateSerializer,
     PedidoSerializer,
 )
 from events.contracts import EventoPedidoCriado, ItemPedidoCriado
-from repositories.models import Category, Item, Pedido, PedidoItem, User
+from events.topology import topologia_de
+from repositories.models import Category, Item, Notificacao, Pedido, PedidoItem, User
 from services import cache as cache_service
+from services import health as health_service
+from services import pagamento as pagamento_service
 from services.events import (
     CATEGORIA_ATUALIZADA,
     CATEGORIA_CRIADA,
@@ -29,13 +36,31 @@ from services.events import (
     ITEM_REMOVIDO,
     emitir_apos_commit,
 )
-from services.messaging import MensageriaIndisponivel, ProdutorPedidoCriado
+from services.publicacao import publicar_evento
 
 logger_pedidos = logging.getLogger("synapseshop.pedidos")
 
 
 def health(request):
+    """Liveness: responde enquanto o processo conseguir atender a requisição.
+
+    É deliberadamente superficial — o Compose reinicia a API quando esta rota
+    falha, então ela não pode depender de nada externo. Quem verifica as
+    dependências de verdade é ``GET /health/pronto``.
+    """
     return JsonResponse({"status": "ok"})
+
+
+def health_pronto(request):
+    """Readiness: PostgreSQL, Redis e broker respondendo? 200 ou 503.
+
+    Distinguir as duas rotas evita o pior modo de falha do Compose: com a
+    readiness atrelada ao liveness, o Redis cair faria o contêiner da API ser
+    reiniciado em laço — a API não tem culpa e o reinício não conserta o Redis.
+    """
+    relatorio = health_service.verificar()
+    status = 200 if relatorio["pronto"] else 503
+    return JsonResponse(relatorio, status=status)
 
 
 class IsAdminRole(permissions.BasePermission):
@@ -223,6 +248,10 @@ class PedidoCreateView(APIView):
                     status=Pedido.Status.PENDENTE,
                     total=total,
                     idempotency_key=idempotency_key,
+                    # Identificador que atravessa pagamento e notificação: sem ele,
+                    # cada evento da cadeia teria um id próprio e os logs não
+                    # permitiriam ler o fluxo inteiro de um pedido.
+                    correlation_id=str(uuid4()),
                 )
                 PedidoItem.objects.bulk_create(
                     [
@@ -253,6 +282,7 @@ class PedidoCreateView(APIView):
             idempotency_key=idempotency_key,
             total=str(pedido.total),
             itens=len(itens_pedido),
+            correlation_id=pedido.correlation_id,
         )
 
         evento = EventoPedidoCriado(
@@ -269,9 +299,15 @@ class PedidoCreateView(APIView):
                 )
                 for linha in itens_pedido
             ],
-            correlation_id=str(uuid4()),
+            correlation_id=pedido.correlation_id,
         )
-        publicado = _publicar_pedido_criado(evento, idempotency_key)
+        publicado = publicar_evento(
+            evento=evento.to_dict(),
+            idempotency_key=idempotency_key,
+            topologia=topologia_de(evento.event_type),
+            prefixo_log="pedido",
+            extra={"pedido_id": pedido.pk, "usuario_id": pedido.usuario_id},
+        )
 
         corpo = PedidoSerializer(pedido).data
         if not publicado:
@@ -282,47 +318,109 @@ class PedidoCreateView(APIView):
         return Response({**corpo, "evento_publicado": True}, status=201)
 
 
+class PagamentoView(APIView):
+    """Produtor do evento ``PagamentoProcessado`` (Aula 11).
+
+    A simulação acontece aqui: o corpo traz o desfecho desejado
+    (``{"resultado": "APROVADO"}``) e o servidor o persiste como resposta de um
+    adquirente. O pagamento move o pedido para ``PAGO`` ou ``CANCELADO`` e publica
+    o evento que dispara a notificação.
+
+    Repetir a chamada devolve **200** com o pagamento existente e **não publica
+    evento novo** — a unicidade é do banco (``OneToOne``), não de uma condição
+    aqui. Por isso não existe chave de idempotência no corpo: ela seria uma
+    segunda forma de dizer a mesma coisa.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        serializer = PagamentoCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        dados = serializer.validated_data
+
+        pedido = Pedido.objects.select_related("usuario").filter(pk=pk).first()
+        if pedido is None or not _pedido_visivel(request, pedido):
+            return Response({"detail": "Pedido não encontrado."}, status=404)
+
+        pagamento, criado = pagamento_service.registrar_pagamento(
+            pedido,
+            resultado=dados["resultado"],
+            forma_pagamento=dados["forma_pagamento"],
+        )
+        if not criado:
+            _log_pedido(
+                "pagamento.duplicado.resposta",
+                pedido_id=pedido.pk,
+                pagamento_id=pagamento.pk,
+                status=pagamento.status,
+            )
+            return Response(
+                {
+                    **PagamentoSerializer(pagamento).data,
+                    "evento_publicado": False,
+                },
+                status=200,
+            )
+
+        publicado = pagamento_service.publicar_pagamento_processado(pagamento)
+        return Response(
+            {**PagamentoSerializer(pagamento).data, "evento_publicado": publicado},
+            status=201,
+        )
+
+
+def _pedido_visivel(request, pedido) -> bool:
+    """O pedido pertence a quem o criou; o papel ``admin`` enxerga qualquer um."""
+    if getattr(request.user, "role", None) == User.Roles.ADMIN:
+        return True
+    return pedido.usuario_id == request.user.id
+
+
 class PedidoDetailView(APIView):
     """Consulta o estado de um pedido — a forma de observar o efeito do consumidor.
 
     O pedido pertence a quem o criou; o papel ``admin`` enxerga qualquer um.
     Existe para tornar observável a transição ``PENDENTE`` -> ``PROCESSANDO``
     feita pelo worker, sem duplicar o ViewSet de escrita.
+
+    Aula 11: a resposta é cacheada em ``pedido:<id>`` (TTL ``CACHE_TTL_PEDIDO``) e o
+    header ``X-Cache`` diz se veio do Redis ou do PostgreSQL. A chave é por pedido
+    e não por usuário — o ``usuario`` está no próprio payload, então a posse é
+    conferida sobre o dado, inclusive quando ele vem do cache, e um HIT não
+    precisa tocar o banco para decidir se pode responder.
     """
 
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, pk):
-        pedido = Pedido.objects.filter(pk=pk).first()
-        if pedido is None:
-            return Response({"detail": "Pedido não encontrado."}, status=404)
         eh_admin = getattr(request.user, "role", None) == User.Roles.ADMIN
-        if not eh_admin and pedido.usuario_id != request.user.id:
+
+        def produtor():
+            pedido = Pedido.objects.filter(pk=pk).first()
+            if pedido is None:
+                return None
+            return PedidoSerializer(pedido).data
+
+        dados, resultado = cache_service.get_pedido(pk, produtor)
+        if dados is None or (not eh_admin and dados["usuario"] != request.user.id):
             return Response({"detail": "Pedido não encontrado."}, status=404)
-        return Response(PedidoSerializer(pedido).data)
+        return resposta_com_cache(dados, resultado)
 
 
-def _publicar_pedido_criado(evento: EventoPedidoCriado, idempotency_key: str) -> bool:
-    """Publica o evento. Devolve ``False`` quando o broker está fora do ar.
+class NotificacaoListView(ListAPIView):
+    """Notificações do usuário autenticado (Aula 11), mais recentes primeiro.
 
-    Falha de broker não pode derrubar a criação do pedido (o dado já está
-    commitado), então o desfecho é registrado em log e sinalizado na resposta.
+    É a forma de observar o efeito do ``notificacao-worker`` por fora: a notificação
+    é gravada por um consumidor, em outro processo, a partir de um evento.
     """
-    if not settings.MESSAGERIA_ENABLED:
-        _log_pedido(
-            "pedido.publicacao_ignorada",
-            idempotency_key=idempotency_key,
-            motivo="MESSAGERIA_ENABLED=false",
+
+    serializer_class = NotificacaoSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return (
+            Notificacao.objects.filter(pedido__usuario=self.request.user)
+            .select_related("pedido", "pagamento")
+            .all()
         )
-        return False
-    try:
-        with ProdutorPedidoCriado() as produtor:
-            produtor.publicar(evento.to_dict(), idempotency_key)
-        return True
-    except MensageriaIndisponivel as exc:
-        _log_pedido(
-            "pedido.publicacao_falhou",
-            idempotency_key=idempotency_key,
-            erro=str(exc),
-        )
-        return False

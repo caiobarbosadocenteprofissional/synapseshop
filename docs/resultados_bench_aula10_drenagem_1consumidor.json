@@ -1,0 +1,23 @@
+{
+  "rotulo": "kafka-drenagem-1-consumidor-1000",
+  "broker": "kafka",
+  "modo": "drenagem",
+  "marca": "ed71487d",
+  "pedidos_rastreados": 1000,
+  "backlog_inicial": 1000,
+  "backlog_final": 0,
+  "mensagens_drenadas": 1000,
+  "pedidos_processados": 1000,
+  "tempo_drenagem_s": 15.081,
+  "throughput_drenagem_msg_s": 66.31,
+  "latencia_desde_criacao": {
+    "amostras": 1000,
+    "min_ms": 15912.29,
+    "p50_ms": 67296.345,
+    "p95_ms": 108141.014,
+    "p99_ms": 113180.968,
+    "max_ms": 115934.62,
+    "media_ms": 66196.92
+  },
+  "coletado_em": "2026-10-02T19:59:44-0300"
+}

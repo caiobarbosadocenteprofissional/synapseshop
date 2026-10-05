@@ -13,3 +13,6 @@ django-redis==7.0.*
 # Aula 9: cliente AMQP da mensageria assíncrona (RabbitMQ) — produtor na API e
 # consumidor no `pedido-worker`.
 pika==1.3.*
+# Aula 10: cliente Kafka (librdkafka) — mesmo par produtor/consumidor, com chave
+# de partição, semântica de offset explícita e topologia declarada pela aplicação.
+confluent-kafka==2.*

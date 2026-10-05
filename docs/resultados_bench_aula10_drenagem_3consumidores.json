@@ -1,0 +1,23 @@
+{
+  "rotulo": "kafka-drenagem-3-consumidores-1000",
+  "broker": "kafka",
+  "modo": "drenagem",
+  "marca": "14a8de24",
+  "pedidos_rastreados": 1000,
+  "backlog_inicial": 1000,
+  "backlog_final": 0,
+  "mensagens_drenadas": 1000,
+  "pedidos_processados": 1000,
+  "tempo_drenagem_s": 12.413,
+  "throughput_drenagem_msg_s": 80.56,
+  "latencia_desde_criacao": {
+    "amostras": 1000,
+    "min_ms": 14819.7,
+    "p50_ms": 60705.398,
+    "p95_ms": 100003.621,
+    "p99_ms": 103707.755,
+    "max_ms": 105071.17,
+    "media_ms": 60814.55
+  },
+  "coletado_em": "2026-10-02T20:03:00-0300"
+}

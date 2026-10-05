@@ -29,12 +29,45 @@ services:
       CACHE_ENABLED: ${CACHE_ENABLED:-true}
       CACHE_TTL_LISTA: ${CACHE_TTL_LISTA:-60}
       CACHE_TTL_DETALHE: ${CACHE_TTL_DETALHE:-300}
+      CACHE_TTL_PEDIDO: ${CACHE_TTL_PEDIDO:-60}
       MESSAGERIA_ENABLED: ${MESSAGERIA_ENABLED:-true}
+      MENSAGERIA_BROKER: ${MENSAGERIA_BROKER:-kafka}
+      # Dentro da rede do Compose o bootstrap é o listener interno (29092).
+      # Fora do Docker use localhost:9092 (ver .env.example).
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:29092}
+      KAFKA_TOPICO_PEDIDO_CRIADO: ${KAFKA_TOPICO_PEDIDO_CRIADO:-pedidos.pedidocriado}
+      KAFKA_TOPICO_PEDIDO_CRIADO_DLQ: ${KAFKA_TOPICO_PEDIDO_CRIADO_DLQ:-pedidos.pedidocriado.dlq}
+      KAFKA_TOPICO_PAGAMENTO_PROCESSADO: ${KAFKA_TOPICO_PAGAMENTO_PROCESSADO:-pagamentos.pagamentoprocessado}
+      KAFKA_TOPICO_PAGAMENTO_PROCESSADO_DLQ: ${KAFKA_TOPICO_PAGAMENTO_PROCESSADO_DLQ:-pagamentos.pagamentoprocessado.dlq}
+      KAFKA_TOPICO_NOTIFICACAO_ENVIADA: ${KAFKA_TOPICO_NOTIFICACAO_ENVIADA:-notificacoes.notificacaoenviada}
+      KAFKA_TOPICO_NOTIFICACAO_ENVIADA_DLQ: ${KAFKA_TOPICO_NOTIFICACAO_ENVIADA_DLQ:-notificacoes.notificacaoenviada.dlq}
+      KAFKA_GRUPO_NOTIFICACAO: ${KAFKA_GRUPO_NOTIFICACAO:-notificacao-worker}
+      KAFKA_PARTICOES: ${KAFKA_PARTICOES:-3}
+      KAFKA_REPLICAS: ${KAFKA_REPLICAS:-1}
+      KAFKA_RETENTION_MS: ${KAFKA_RETENTION_MS:-604800000}
+      KAFKA_CLEANUP_POLICY: ${KAFKA_CLEANUP_POLICY:-delete}
+      KAFKA_PRODUCER_ACKS: ${KAFKA_PRODUCER_ACKS:-all}
+      KAFKA_PRODUCER_LINGER_MS: ${KAFKA_PRODUCER_LINGER_MS:-5}
       RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
       RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
       RABBITMQ_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
       RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/}
+      # A API também é *publisher* da Camada 5, então precisa da topologia: sem
+      # estes nomes ela publicaria em um destino diferente do que os workers
+      # consomem — falha silenciosa, do tipo "mensagem presa numa fila vazia".
+      RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-pedidos.events}
+      RABBITMQ_DLX: ${RABBITMQ_DLX:-pedidos.dlx}
+      RABBITMQ_FILA_PEDIDO_CRIADO: ${RABBITMQ_FILA_PEDIDO_CRIADO:-pedidos.pedidocriado}
+      RABBITMQ_FILA_PEDIDO_CRIADO_DLQ: ${RABBITMQ_FILA_PEDIDO_CRIADO_DLQ:-pedidos.pedidocriado.dlq}
+      RABBITMQ_FILA_PAGAMENTO_PROCESSADO: ${RABBITMQ_FILA_PAGAMENTO_PROCESSADO:-pagamentos.pagamentoprocessado}
+      RABBITMQ_FILA_PAGAMENTO_PROCESSADO_DLQ: ${RABBITMQ_FILA_PAGAMENTO_PROCESSADO_DLQ:-pagamentos.pagamentoprocessado.dlq}
+      RABBITMQ_FILA_NOTIFICACAO_ENVIADA: ${RABBITMQ_FILA_NOTIFICACAO_ENVIADA:-notificacoes.notificacaoenviada}
+      RABBITMQ_FILA_NOTIFICACAO_ENVIADA_DLQ: ${RABBITMQ_FILA_NOTIFICACAO_ENVIADA_DLQ:-notificacoes.notificacaoenviada.dlq}
+      RABBITMQ_ROUTING_KEY_PEDIDO_CRIADO: ${RABBITMQ_ROUTING_KEY_PEDIDO_CRIADO:-pedido.criado}
+      RABBITMQ_ROUTING_KEY_PAGAMENTO_PROCESSADO: ${RABBITMQ_ROUTING_KEY_PAGAMENTO_PROCESSADO:-pagamento.processado}
+      RABBITMQ_ROUTING_KEY_NOTIFICACAO_ENVIADA: ${RABBITMQ_ROUTING_KEY_NOTIFICACAO_ENVIADA:-notificacao.enviada}
+      RABBITMQ_PREFETCH: ${RABBITMQ_PREFETCH:-1}
     depends_on:
       postgres:
         condition: service_healthy
@@ -42,6 +75,13 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      kafka:
+        condition: service_healthy
+    # Aula 11: o healthcheck do Compose é o **liveness** (`/health`), que só
+    # responde se o processo atende. A readiness (`/health/pronto`) consulta
+    # PostgreSQL, Redis e broker e responde 503 quando algum deles cai; usá-la
+    # aqui reiniciaria a API em laço por causa de uma falha que o reinício não
+    # conserta — foi a divisão entre as duas rotas que resolveu isso.
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s
@@ -50,13 +90,18 @@ services:
       start_period: 20s
 
   # Aula 9: worker consumidor do evento `PedidoCriado`. Mesmo código e migrações
-  # da API (a imagem é a mesma); só o comando muda. Consome a fila
-  # `pedidos.pedidocriado` com ack manual, reentrega por recuo exponencial e
-  # encaminha para a DLQ o que esgota as tentativas.
+  # da API (a imagem é a mesma); só o comando muda. Desde a Aula 10 ele consome
+  # o tópico `pedidos.pedidocriado` com commit manual de offset, reentrega por
+  # recuo exponencial e publica na DLQ o que esgota as tentativas. Para medir
+  # paralelismo por partição: `docker compose up -d --scale pedido-worker=3`.
+  # Desde a Aula 11 ele também invalida a chave `pedido:<id>` ao mover o pedido
+  # para PROCESSANDO — o cache do detalhe vive no Redis compartilhado e muda de
+  # estado aqui, em outro processo que não é o da API.
   pedido-worker:
     build: .
     image: synapseshop:dev
-    container_name: synapseshop-pedido-worker
+    # Sem `container_name`: é o que permite `docker compose up -d --scale
+    # pedido-worker=3` medir o paralelismo por partição (nome fixo é único).
     restart: unless-stopped
     command: ["sh", "-c", "python manage.py migrate --noinput && python -m workers.pedido_worker"]
     environment:
@@ -70,6 +115,26 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-synapseshop}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/1}
       CACHE_ENABLED: ${CACHE_ENABLED:-true}
+      CACHE_TTL_PEDIDO: ${CACHE_TTL_PEDIDO:-60}
+      MENSAGERIA_BROKER: ${MENSAGERIA_BROKER:-kafka}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:29092}
+      KAFKA_TOPICO_PEDIDO_CRIADO: ${KAFKA_TOPICO_PEDIDO_CRIADO:-pedidos.pedidocriado}
+      KAFKA_TOPICO_PEDIDO_CRIADO_DLQ: ${KAFKA_TOPICO_PEDIDO_CRIADO_DLQ:-pedidos.pedidocriado.dlq}
+      KAFKA_TOPICO_PAGAMENTO_PROCESSADO: ${KAFKA_TOPICO_PAGAMENTO_PROCESSADO:-pagamentos.pagamentoprocessado}
+      KAFKA_TOPICO_PAGAMENTO_PROCESSADO_DLQ: ${KAFKA_TOPICO_PAGAMENTO_PROCESSADO_DLQ:-pagamentos.pagamentoprocessado.dlq}
+      KAFKA_TOPICO_NOTIFICACAO_ENVIADA: ${KAFKA_TOPICO_NOTIFICACAO_ENVIADA:-notificacoes.notificacaoenviada}
+      KAFKA_TOPICO_NOTIFICACAO_ENVIADA_DLQ: ${KAFKA_TOPICO_NOTIFICACAO_ENVIADA_DLQ:-notificacoes.notificacaoenviada.dlq}
+      KAFKA_PARTICOES: ${KAFKA_PARTICOES:-3}
+      KAFKA_REPLICAS: ${KAFKA_REPLICAS:-1}
+      KAFKA_RETENTION_MS: ${KAFKA_RETENTION_MS:-604800000}
+      KAFKA_CLEANUP_POLICY: ${KAFKA_CLEANUP_POLICY:-delete}
+      KAFKA_GRUPO_CONSUMIDORES: ${KAFKA_GRUPO_CONSUMIDORES:-pedido-worker}
+      KAFKA_AUTO_OFFSET_RESET: ${KAFKA_AUTO_OFFSET_RESET:-earliest}
+      KAFKA_PRODUCER_ACKS: ${KAFKA_PRODUCER_ACKS:-all}
+      KAFKA_PRODUCER_LINGER_MS: ${KAFKA_PRODUCER_LINGER_MS:-5}
+      KAFKA_POLL_TIMEOUT_S: ${KAFKA_POLL_TIMEOUT_S:-1.0}
+      KAFKA_SESSION_TIMEOUT_MS: ${KAFKA_SESSION_TIMEOUT_MS:-10000}
+      KAFKA_MAX_POLL_INTERVAL_MS: ${KAFKA_MAX_POLL_INTERVAL_MS:-300000}
       RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
       RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
       RABBITMQ_USER: ${RABBITMQ_USER:-guest}
@@ -78,12 +143,21 @@ services:
       RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-pedidos.events}
       RABBITMQ_FILA_PEDIDO_CRIADO: ${RABBITMQ_FILA_PEDIDO_CRIADO:-pedidos.pedidocriado}
       RABBITMQ_FILA_PEDIDO_CRIADO_DLQ: ${RABBITMQ_FILA_PEDIDO_CRIADO_DLQ:-pedidos.pedidocriado.dlq}
+      RABBITMQ_FILA_PAGAMENTO_PROCESSADO: ${RABBITMQ_FILA_PAGAMENTO_PROCESSADO:-pagamentos.pagamentoprocessado}
+      RABBITMQ_FILA_PAGAMENTO_PROCESSADO_DLQ: ${RABBITMQ_FILA_PAGAMENTO_PROCESSADO_DLQ:-pagamentos.pagamentoprocessado.dlq}
+      RABBITMQ_FILA_NOTIFICACAO_ENVIADA: ${RABBITMQ_FILA_NOTIFICACAO_ENVIADA:-notificacoes.notificacaoenviada}
+      RABBITMQ_FILA_NOTIFICACAO_ENVIADA_DLQ: ${RABBITMQ_FILA_NOTIFICACAO_ENVIADA_DLQ:-notificacoes.notificacaoenviada.dlq}
       RABBITMQ_DLX: ${RABBITMQ_DLX:-pedidos.dlx}
       RABBITMQ_ROUTING_KEY_PEDIDO_CRIADO: ${RABBITMQ_ROUTING_KEY_PEDIDO_CRIADO:-pedido.criado}
+      RABBITMQ_ROUTING_KEY_PAGAMENTO_PROCESSADO: ${RABBITMQ_ROUTING_KEY_PAGAMENTO_PROCESSADO:-pagamento.processado}
+      RABBITMQ_ROUTING_KEY_NOTIFICACAO_ENVIADA: ${RABBITMQ_ROUTING_KEY_NOTIFICACAO_ENVIADA:-notificacao.enviada}
       RABBITMQ_PREFETCH: ${RABBITMQ_PREFETCH:-1}
       MENSAGERIA_MAX_RETRIES: ${MENSAGERIA_MAX_RETRIES:-3}
       MENSAGERIA_BACKOFF_BASE_MS: ${MENSAGERIA_BACKOFF_BASE_MS:-250}
       MENSAGERIA_BACKOFF_MAX_MS: ${MENSAGERIA_BACKOFF_MAX_MS:-5000}
+      # Batimento de ociosidade: sem tráfego não há log por mensagem, e a
+      # pergunta "o worker está vivo?" precisa ter resposta em log.
+      MENSAGERIA_HEARTBEAT_S: ${MENSAGERIA_HEARTBEAT_S:-60}
       IDEMPOTENCIA_TTL_SEGUNDOS: ${IDEMPOTENCIA_TTL_SEGUNDOS:-86400}
       # DoD "erro forcado": lista de idempotency_keys rejeitadas pelo worker,
       # usada para validar reentrega e DLQ sem alterar o código.
@@ -91,7 +165,90 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      api:
+        condition: service_started
+
+  # Aula 11: worker consumidor do evento `PagamentoProcessado`. Mesmo código e
+  # migrações da API; consome o pagamento e publica `NotificacaoEnviada`, o que
+  # fecha Pedido ➔ Pagamento ➔ Notificação. Grupo de consumo próprio
+  # (`KAFKA_GRUPO_NOTIFICACAO`), para que escalar este worker não dispute com o
+  # `pedido-worker` as partições do evento de pedido.
+  notificacao-worker:
+    build: .
+    image: synapseshop:dev
+    # Sem `container_name` pelo mesmo motivo do pedido-worker: permite escalar.
+    restart: unless-stopped
+    command: ["sh", "-c", "python manage.py migrate --noinput && python -m workers.notificacao_worker"]
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-insecure-synapseshop-change-me}
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-true}
+      LOG_LEVEL_SYNAPSESHOP: ${LOG_LEVEL_SYNAPSESHOP:-INFO}
+      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-synapseshop}
+      POSTGRES_USER: ${POSTGRES_USER:-synapseshop}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-synapseshop}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/1}
+      CACHE_ENABLED: ${CACHE_ENABLED:-true}
+      CACHE_TTL_PEDIDO: ${CACHE_TTL_PEDIDO:-60}
+      MENSAGERIA_BROKER: ${MENSAGERIA_BROKER:-kafka}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:29092}
+      KAFKA_TOPICO_PEDIDO_CRIADO: ${KAFKA_TOPICO_PEDIDO_CRIADO:-pedidos.pedidocriado}
+      KAFKA_TOPICO_PEDIDO_CRIADO_DLQ: ${KAFKA_TOPICO_PEDIDO_CRIADO_DLQ:-pedidos.pedidocriado.dlq}
+      KAFKA_TOPICO_PAGAMENTO_PROCESSADO: ${KAFKA_TOPICO_PAGAMENTO_PROCESSADO:-pagamentos.pagamentoprocessado}
+      KAFKA_TOPICO_PAGAMENTO_PROCESSADO_DLQ: ${KAFKA_TOPICO_PAGAMENTO_PROCESSADO_DLQ:-pagamentos.pagamentoprocessado.dlq}
+      KAFKA_TOPICO_NOTIFICACAO_ENVIADA: ${KAFKA_TOPICO_NOTIFICACAO_ENVIADA:-notificacoes.notificacaoenviada}
+      KAFKA_TOPICO_NOTIFICACAO_ENVIADA_DLQ: ${KAFKA_TOPICO_NOTIFICACAO_ENVIADA_DLQ:-notificacoes.notificacaoenviada.dlq}
+      KAFKA_PARTICOES: ${KAFKA_PARTICOES:-3}
+      KAFKA_REPLICAS: ${KAFKA_REPLICAS:-1}
+      KAFKA_RETENTION_MS: ${KAFKA_RETENTION_MS:-604800000}
+      KAFKA_CLEANUP_POLICY: ${KAFKA_CLEANUP_POLICY:-delete}
+      KAFKA_GRUPO_NOTIFICACAO: ${KAFKA_GRUPO_NOTIFICACAO:-notificacao-worker}
+      KAFKA_AUTO_OFFSET_RESET: ${KAFKA_AUTO_OFFSET_RESET:-earliest}
+      KAFKA_PRODUCER_ACKS: ${KAFKA_PRODUCER_ACKS:-all}
+      KAFKA_PRODUCER_LINGER_MS: ${KAFKA_PRODUCER_LINGER_MS:-5}
+      KAFKA_POLL_TIMEOUT_S: ${KAFKA_POLL_TIMEOUT_S:-1.0}
+      KAFKA_SESSION_TIMEOUT_MS: ${KAFKA_SESSION_TIMEOUT_MS:-10000}
+      KAFKA_MAX_POLL_INTERVAL_MS: ${KAFKA_MAX_POLL_INTERVAL_MS:-300000}
+      RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+      RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/}
+      RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-pedidos.events}
+      RABBITMQ_FILA_PEDIDO_CRIADO: ${RABBITMQ_FILA_PEDIDO_CRIADO:-pedidos.pedidocriado}
+      RABBITMQ_FILA_PEDIDO_CRIADO_DLQ: ${RABBITMQ_FILA_PEDIDO_CRIADO_DLQ:-pedidos.pedidocriado.dlq}
+      RABBITMQ_FILA_PAGAMENTO_PROCESSADO: ${RABBITMQ_FILA_PAGAMENTO_PROCESSADO:-pagamentos.pagamentoprocessado}
+      RABBITMQ_FILA_PAGAMENTO_PROCESSADO_DLQ: ${RABBITMQ_FILA_PAGAMENTO_PROCESSADO_DLQ:-pagamentos.pagamentoprocessado.dlq}
+      RABBITMQ_FILA_NOTIFICACAO_ENVIADA: ${RABBITMQ_FILA_NOTIFICACAO_ENVIADA:-notificacoes.notificacaoenviada}
+      RABBITMQ_FILA_NOTIFICACAO_ENVIADA_DLQ: ${RABBITMQ_FILA_NOTIFICACAO_ENVIADA_DLQ:-notificacoes.notificacaoenviada.dlq}
+      RABBITMQ_DLX: ${RABBITMQ_DLX:-pedidos.dlx}
+      RABBITMQ_ROUTING_KEY_PEDIDO_CRIADO: ${RABBITMQ_ROUTING_KEY_PEDIDO_CRIADO:-pedido.criado}
+      RABBITMQ_ROUTING_KEY_PAGAMENTO_PROCESSADO: ${RABBITMQ_ROUTING_KEY_PAGAMENTO_PROCESSADO:-pagamento.processado}
+      RABBITMQ_ROUTING_KEY_NOTIFICACAO_ENVIADA: ${RABBITMQ_ROUTING_KEY_NOTIFICACAO_ENVIADA:-notificacao.enviada}
+      RABBITMQ_PREFETCH: ${RABBITMQ_PREFETCH:-1}
+      MENSAGERIA_MAX_RETRIES: ${MENSAGERIA_MAX_RETRIES:-3}
+      MENSAGERIA_BACKOFF_BASE_MS: ${MENSAGERIA_BACKOFF_BASE_MS:-250}
+      MENSAGERIA_BACKOFF_MAX_MS: ${MENSAGERIA_BACKOFF_MAX_MS:-5000}
+      MENSAGERIA_HEARTBEAT_S: ${MENSAGERIA_HEARTBEAT_S:-60}
+      IDEMPOTENCIA_TTL_SEGUNDOS: ${IDEMPOTENCIA_TTL_SEGUNDOS:-86400}
+      # DoD "erro forcado" no segundo elo: rejeita pagamentos cuja chave casa com
+      # o padrão, para exercitar reentrega e DLQ entre pagamento e notificação.
+      NOTIFICACAO_WORKER_FALHA_IDEM_KEYS: ${NOTIFICACAO_WORKER_FALHA_IDEM_KEYS:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      kafka:
         condition: service_healthy
       api:
         condition: service_started
@@ -153,7 +310,8 @@ services:
       retries: 5
 
 # Aula 9: broker AMQP da Camada 5 (RabbitMQ). A Management UI em 15672 é o
-  # instrumento de inspeção das filas e da DLQ durante a validação.
+# instrumento de inspeção das filas e da DLQ durante a validação. Mantido para
+# o caminho `MENSAGERIA_BROKER=rabbitmq`; o padrão desde a Aula 10 é o Kafka.
   rabbitmq:
     image: rabbitmq:3-management
     container_name: synapseshop-rabbitmq
@@ -174,7 +332,54 @@ services:
       retries: 10
       start_period: 30s
 
+# Aula 10: broker de streams da Camada 5 (Apache Kafka), modo KRaft — sem
+# ZooKeeper. Nó único com papel de broker e controller, o que é suficiente
+# para desenvolvimento e não finge alta disponibilidade.
+#
+# `auto.create.topics.enable=false` é deliberado: a topologia é declarada pelo
+# próprio produtor/consumidor (`declarar_topologia`), então partições e
+# retenção ficam versionadas no código e no `.env`, e não implícitas no broker.
+# A retenção padrão (7 dias) é a diferença prática frente à fila do AMQP: o
+# histórico fica no log e pode ser reprocessado por offset.
+  kafka:
+    image: apache/kafka:3.9.1
+    container_name: synapseshop-kafka
+    restart: unless-stopped
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      # Dois listeners de dados porque existem dois tipos de cliente, com redes
+      # diferentes: a rede do Compose (nome `kafka`) e o host de desenvolvimento
+      # (localhost, por onde rodam smoke test e benchmark). Um listener único
+      # resolve para um nome que o outro lado não conhece.
+      KAFKA_LISTENERS: CONTROLLER://:9093,PLAINTEXT://:29092,PLAINTEXT_HOST://:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      # Nó único: os tópicos internos de offset e de transação não podem pedir
+      # três cópias, ou o broker não sobe.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: ${KAFKA_PARTICOES:-3}
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+      - kafkadata:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+
 volumes:
   pgdata:
   redisdata:
   rabbitmqdata:
+  kafkadata:

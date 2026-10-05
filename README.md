@@ -110,7 +110,7 @@ flowchart TB
     subgraph C5["5. Dados & Mensageria"]
         F1["PostgreSQL"]
         F2["Redis"]
-        F3["RabbitMQ / Kafka"]
+        F3["Kafka (padrão) / RabbitMQ"]
     end
 
     subgraph C6["6. Observabilidade, Qualidade & Entrega"]
@@ -132,7 +132,7 @@ flowchart TB
 2. **Gateway de API & Autenticação** — DRF para a API principal, FastAPI para microsserviços; JWT com papéis (roles) e *throttling*.
 3. **Serviços de Negócio** — *Order Service* (criação e eventos), *Payment Service* (pagamento simulado), *Inventory Service* (estoque/produtos) e *Notification Service* (consumidor de eventos).
 4. **Camada de IA** — Assistente de suporte, consultas NL-to-SQL e RAG, integrados a provedores de LLM externos (OpenAI/DeepSeek).
-5. **Dados & Mensageria** — PostgreSQL (relacional + migrações Alembic), Redis (cache-aside), RabbitMQ/Kafka (eventos, idempotência e DLQ).
+5. **Dados & Mensageria** — PostgreSQL (relacional + migrações Alembic), Redis (cache-aside), Kafka (eventos, idempotência e DLQ) com RabbitMQ como broker alternativo.
 6. **Observabilidade, Qualidade & Entrega** — Dashboards Streamlit, testes `pytest`, OpenAPI/Swagger e CI/CD com GitHub Actions.
 
 ---
@@ -160,8 +160,11 @@ docker-compose up
 | :--- | :--- | :--- | :--- |
 | `api` | `synapseshop:dev` (build local) | `8000` | Executa a aplicação e expõe a rota de monitoramento `/health`. |
 | `inventory` | `synapseshop-inventory:dev` (build local) | `8100` | Microsserviço de estoque em FastAPI (Aulas 5–6), com `/docs` e persistência em PostgreSQL via Alembic. |
+| `pedido-worker` | `synapseshop:dev` (build local) | — | Consumidor da Camada 5 (Aulas 9–10). Escalável com `--scale`. |
 | `postgres` | `postgres:16-alpine` | `5432` | Banco de dados relacional do MVP (dados persistidos). |
-| `redis` | `redis:7-alpine` | `6379` | Cache-aside do catálogo e contadores de métricas (Aula 8), com política `allkeys-lru` e volume `redisdata`. |
+| `redis` | `redis:7-alpine` | `6379` | Cache-aside do catálogo, deduplicação e contadores de métricas, com política `allkeys-lru` e volume `redisdata`. |
+| `kafka` | `apache/kafka:3.9.1` | `9092` / `29092` | Broker de eventos (KRaft single-node, Aula 10). `9092` para o host, `29092` para a rede Compose. |
+| `rabbitmq` | `rabbitmq:3-management` | `5672` / `15672` | Broker alternativo (Aula 9), com UI de gerenciamento. |
 
 O serviço `api` recebe via variáveis de ambiente as credenciais do banco
 (`POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`)
@@ -173,6 +176,11 @@ Desde a **Aula 8** a API também depende do serviço `redis` (`REDIS_URL`,
 `service_healthy` do Redis. Se o Redis ficar indisponível, a API continua
 respondendo a partir do PostgreSQL (`IGNORE_EXCEPTIONS=True`) e o header
 `X-Cache` passa a reportar `BYPASS`.
+
+Desde a **Aula 9** a API e o `pedido-worker` publicam e consomem eventos. Desde a
+**Aula 10** o broker padrão é o serviço `kafka` (KRaft, sem ZooKeeper), com
+`service_healthy` antes de qualquer consumidor subir. Os dois brokers ficam de pé
+no Compose; qual está ativo é a variável `MENSAGERIA_BROKER`.
 
 ### Procedimentos
 
@@ -579,63 +587,80 @@ Quando `CACHE_ENABLED=false`, o backend passa a `LocMemCache` e o header
 
 ---
 
-## 13. Mensageria Assíncrona com RabbitMQ (Aula 9)
+## 12. Mensageria Assíncrona — Kafka (Camada 5)
 
-O fluxo de pedidos passou a ser assíncrono: a API grava o pedido e publica o
-evento `PedidoCriado` num broker **RabbitMQ**; um *worker* dedicado consome a
-fila, processa a mensagem e persiste o estado no repositório. Reentregas são
-tratadas por **idempotência**, recuo exponencial e, em último caso, **Dead
-Letter Queue**.
+O fluxo de pedidos é assíncrono: a API grava o pedido e publica o evento
+`PedidoCriado` num broker; um *worker* dedicado consome a fila, processa a
+mensagem e persiste o estado no repositório. Reentregas são tratadas por
+**idempotência**, recuo exponencial e, em último caso, **Dead Letter Queue**.
 
-### Por que RabbitMQ (e não Kafka)
+O broker padrão é o **Kafka** (Aula 10). O **RabbitMQ** da Aula 9 continua
+funcionando atrás da mesma fachada — a escolha de broker é uma variável de
+ambiente, e ambos passam no mesmo smoke test.
 
-A spec da Aula 9 abre duas opções. Optou-se pelo **RabbitMQ** porque o requisito
-desta etapa é o tratamento de falha **por mensagem** (reentrega com contagem de
-tentativas e DLQ por fila), e o AMQP resolve isso de forma nativa e declarativa:
-a *dead-letter exchange* é um atributo da fila, sem código extra no produtor. O
-Kafka exigiria reprocessar o log a partir de um offset, traz retenção e
-particionamento que só compensam em arquiteturas de *streaming* eeventos de alta
-volumia, que são escopo das aulas seguintes (pagamento, notificação).
+### Kafka ou RabbitMQ
 
-| Critério | RabbitMQ | Kafka |
+| Critério | Kafka (padrão) | RabbitMQ (alternativo) |
 | :--- | :--- | :--- |
-| Rota de falha por mensagem | DLX nativa por fila | reprocessamento por offset |
-| Preservação da ordem | por fila (*round-robin*) | por partição |
-| Latência | baixa | maior (*polling* no consumidor) |
-| Volume alto / retenção | limitado | otimizado |
+| Paralelismo de consumo | por partição do tópico | por consumidor da fila |
+| Retenção | nativa, por tópico | limitada a filas duráveis |
+| Reentrega com contagem | header `x-retry-count` na republicação | *nack requeue* / DLX nativa |
+| Rota de falha | tópico DLQ explícito | *dead-letter exchange* da fila |
+| Ordem | por partição (chave = `idempotency_key`) | por fila (*round-robin*) |
 
-O contrato em `events/contracts.py` já traz `event_type` e `version`, de modo que
-trocar de broker não quebra o formato da mensagem.
+O contrato em `events/contracts.py` traz `event_type` e `version`, então a troca
+de broker não quebra o formato da mensagem. A decisão e o porquê de cada escolha
+estão em [`docs/DECISOES_TECNICAS_AULA10.md`](docs/DECISOES_TECNICAS_AULA10.md).
 
-### Topologia
+### Topologia do Kafka
 
 ```
-                    ┌──────────────┐   publish (topic, persistida)
-  POST /pedidos/ ──▶│pedidos.events│──────────────────────────────┐
-                    └──────────────┘                               │
-                                                                   ▼
-                                                    ┌───────────────────────────┐
-                                                    │ pedidos.pedidocriado      │
-                                                    │ (x-dead-letter-exchange)  │
-                                                    └───────────────────────────┘
-                                                             │ nack sem requeue
-                                                             │ (tentativas esgotadas)
-                                                    ┌────────▼─────────────┐
-                                                    │ pedidos.dlx           │
-                                                    └────────┬─────────────┘
-                                                             ▼
-                                                  ┌──────────────────────┐
-                                                  │ pedidos.pedidocriado │  ← inspeção
-                                                  │        .dlq          │    manual
-                                                  └──────────────────────┘
+   POST /api/v1/pedidos/ ──▶-key: idempotency_key─▶┌───────────────────────┐
+                                                   │  pedidos.pedidocriado │
+                                                   │  3 partições          │
+                                                   │  retenção 7 dias      │
+                                                   └───────────┬───────────┘
+                                                               │ consumer group
+                                                               │ pedido-worker
+                                                    ┌──────────▼───────────┐
+                                                    │  pedido-worker       │  PENDENTE → PROCESSANDO
+                                                    │  commit manual       │  (síncrono, após o efeito)
+                                                    └──────────┬───────────┘
+                                          falhas esgotadas   │
+                                                    ┌──────────▼───────────┐
+                                                    │ pedidos.pedidocriado │  ← inspeção
+                                                    │        .dlq          │    manual
+                                                    │  1 partição          │
+                                                    │  retenção 28 dias    │
+                                                    └──────────────────────┘
 ```
 
-| Elemento | Tipo | Observação |
+| Elemento | Configuração | Observação |
 | :--- | :--- | :--- |
-| `pedidos.events` | exchange `topic` | Eventos de domínio do pedido. |
-| `pedidos.pedidocriado` | fila durável | Dead-letter para `pedidos.dlx`; `prefetch=1`. |
-| `pedidos.dlx` | exchange `direct` | Roteia mensagens mortas. |
-| `pedidos.pedidocriado.dlq` | fila durável | Mensagens mortas, para inspeção. |
+| `pedidos.pedidocriado` | 3 partições, retenção `604800000` ms | Eventos de `PedidoCriado`. |
+| `pedidos.pedidocriado.dlq` | 1 partição, retenção `2419200000` ms | Mensagens mortas, para inspeção. |
+| `pedido-worker` | consumer group | Um consumidor por partição. |
+| Chave de partição | `idempotency_key` | Eventos do mesmo pedido ficam na mesma partição, em ordem. |
+| Réplicas | `KAFKA_REPLICAS=1` | Broker único no Compose; subir em cluster. |
+
+A topologia é **declarada pela aplicação** (`declarar_topologia()`, via
+`AdminClient`), de forma idempotente: producer e consumer chamam a mesma função
+na subida, e `TOPIC_ALREADY_EXISTS` é sucesso. Assim não existe passo de setup
+manual que alguém esqueça.
+
+### Listeners
+
+O mesmo broker atende duas redes:
+
+| Listener | Endereço | Quem usa |
+| :--- | :--- | :--- |
+| Compose | `kafka:29092` | Containers (`api`, `pedido-worker`). |
+| Host | `localhost:9092` | Scripts rodados na máquina de desenvolvimento. |
+
+Os dois são texto puro, sem TLS — adequado à stack local. Para o host, os
+scripts precisam de `KAFKA_BOOTSTRAP_SERVERS=localhost:9092`, porque o default
+de `config/settings.py` também é `localhost` e o do Compose é `kafka:29092`.
+
 
 ### Contrato da mensagem `PedidoCriado`
 
@@ -704,19 +729,22 @@ Pontos-chave da regra:
 | `MENSAGERIA_MAX_RETRIES` | `3` | Reentregas **além** da primeira tentativa (4 tentativas no total). |
 | `MENSAGERIA_BACKOFF_BASE_MS` | `250` | Base do recuo exponencial. |
 | `MENSAGERIA_BACKOFF_MAX_MS` | `5000` | Teto do recuo. |
-| `RABBITMQ_PREFETCH` | `1` | Uma mensagem por vez; nada se perde em requeue. |
+| `RABBITMQ_PREFETCH` | `1` | Uma mensagem por vez; nada se perde em requeue (só no RabbitMQ). |
 
-Política aplicada, com o consumidor em `ack` manual:
+A contagem de tentativas atravessa o broker em headers, e não em memória do
+processo — é isso que permite a reentrega continuar de onde parou.
 
-1. Sucesso → `ack`.
-2. Falha com `tentativa < MAX_RETRIES` → republica o mesmo corpo com
-   `x-retry-count` incrementado, aguarda o recuo exponencial
-   (`250 ms → 500 ms → 1000 ms → …`, limitado por `BACKOFF_MAX`) e então confirma
-   a original. Se o broker **não** confirmar a republicação, a original é
-   reenfileirada (`nack requeue=true`) em vez de ser perdida.
-3. `tentativa >= MAX_RETRIES` → `nack` sem *requeue*; o broker encaminha a
-   mensagem para `pedidos.pedidocriado.dlq` pela *dead-letter exchange*. Não há
-   consumo automático da DLQ: a decisão de reprocessar é humana.
+1. Sucesso → confirma o offset (`commit` síncrono, **depois** do efeito gravado).
+2. Falha com `tentativa < MAX_RETRIES` → republica o mesmo corpo em
+   `pedidos.pedidocriado` com `x-retry-count` incrementado, aguarda o recuo
+   exponencial (`250 ms → 500 ms → 1000 ms → …`, limitado por `BACKOFF_MAX`) e
+   então confirma a original.
+3. `tentativa >= MAX_RETRIES` → publica em `pedidos.pedidocriado.dlq` com o erro
+   em `x-ultimo-erro` e confirma a original. Não há consumo automático da DLQ: a
+   decisão de reprocessar é humana.
+
+No RabbitMQ, os mesmos passos usam `ack` manual, *nack requeue* para a reentrega
+e *dead-letter exchange* para a DLQ.
 
 Corpo ilegível (JSON inválido) não tem como ser reprocessado e vai direto para a
 DLQ, sem consumir tentativas.
@@ -726,11 +754,15 @@ DLQ, sem consumir tentativas.
 | Caminho | Responsabilidade |
 | :--- | :--- |
 | `events/contracts.py` | Contrato `PedidoCriado` (serialização e validação). |
-| `services/messaging.py` | Topologia, produtor, consumidor com *ack* manual, reentrega e DLQ. |
+| `services/messaging.py` | Fachada: escolhe o broker a partir de `MENSAGERIA_BROKER`. |
+| `services/messaging_kafka.py` | Topologia, produtor, consumidor com offset manual, reentrega e DLQ. |
+| `services/messaging_rabbit.py` | Mesmo contrato sobre RabbitMQ (broker alternativo). |
 | `services/idempotencia.py` | Chave de deduplicação com TTL (Redis + PostgreSQL). |
 | `api/views.py` | `PedidoCreateView` (produtor) e `PedidoDetailView` (observabilidade). |
 | `workers/pedido_worker.py` | Consumidor: valida o contrato, deduplica e persiste o estado. |
-| `scripts/smoke_test_mensageria.py` | Verificação do fluxo, da idempotência e da DLQ. |
+| `scripts/smoke_test_mensageria.py` | Verificação do fluxo, da idempotência e da DLQ em ambos os brokers. |
+| `scripts/bench_mensageria.py` | Latência ponta a ponta, percentis e throughput de consumo. |
+
 
 ### Endpoints
 
@@ -781,11 +813,12 @@ curl -i -X POST http://localhost:8000/api/v1/pedidos/ \
 # Logs de produtor e consumidor
 docker compose logs -f api pedido-worker
 
-# UI de gerenciamento do broker (guest/guest)
+# UI de gerenciamento do RabbitMQ (broker alternativo; guest/guest)
 # http://localhost:15672
 
-# Contagem de mensagens nas filas
-docker compose exec -T rabbitmq rabbitmqctl list_queues name messages
+# Estado dos tópicos do Kafka
+docker compose exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:29092 --list
+docker compose exec -T kafka /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:29092 --describe --group pedido-worker
 ```
 
 ### Operação
@@ -793,8 +826,12 @@ docker compose exec -T rabbitmq rabbitmqctl list_queues name messages
 | Comando | Efeito |
 | :--- | :--- |
 | `PEDIDO_WORKER_FALHA_IDEM_KEYS="pedido-dlq-*" docker compose up -d --force-recreate pedido-worker` | Worker rejeita pedidos cujo padrão casa — simula erro para validar reentrega/DLQ |
-| `docker compose exec -T rabbitmq rabbitmqctl purge_queue pedidos.pedidocriado.dlq` | Limpa a DLQ depois da inspeção |
-| `docker compose exec -T rabbitmq rabbitmqctl list_queues name messages` | Estado das filas |
+| `MENSAGERIA_BROKER=rabbitmq docker compose up -d --force-recreate api pedido-worker` | Alterna para o broker da Aula 9 |
+| `MENSAGERIA_BROKER=kafka docker compose up -d --force-recreate api pedido-worker` | Volta ao Kafka |
+| `docker compose up -d --scale pedido-worker=3 pedido-worker` | Escala o consumo (1 consumidor por partição) |
+| `docker compose exec -T kafka ... --delete --topic pedidos.pedidocriado.dlq` | Remove a DLQ depois da inspeção |
+| `docker compose exec -T rabbitmq rabbitmqctl purge_queue pedidos.pedidocriado.dlq` | Limpa a DLQ do RabbitMQ |
+| `docker compose exec -T rabbitmq rabbitmqctl list_queues name messages` | Estado das filas do RabbitMQ |
 | `docker compose logs -f pedido-worker` | Logs do consumidor |
 | `MESSAGERIA_ENABLED=false docker compose up -d --force-recreate api` | Kill-switch: grava o pedido sem publicar (202) |
 
@@ -803,6 +840,9 @@ a resposta é `202` com `evento_publicado: false`, o que isola o custo da
 sincronia ponta a ponta em medições.
 
 ### Verificação funcional
+
+O smoke test é o mesmo nos dois brokers — ele detecta o broker ativo por
+`MENSAGERIA_BROKER` e adapta as verificações de partição/DLQ.
 
 ```bash
 # Fluxo feliz + idempotência (o cenário de DLQ é pulado sem o modo forçado)
@@ -813,14 +853,52 @@ PEDIDO_WORKER_FALHA_IDEM_KEYS="pedido-dlq-*" docker compose up -d --force-recrea
 python scripts/smoke_test_mensageria.py
 ```
 
-Resultado da validação: **23 PASS / 0 FAIL**, cobrindo publicação, contrato,
-consumo com persistência do estado, idempotência no produtor, idempotência na
-reentrega (o teste republica o mesmo evento pela Management API) e chegada à DLQ
-com o pedido ainda em `PENDENTE`.
+Resultado da validação:
+
+| Broker | Resultado | Verificações extras |
+| :--- | :--- | :--- |
+| Kafka | **25 PASS / 0 FAIL** | Mesma chave sempre na mesma partição; chaves diferentes se espalham pelas 3 partições |
+| RabbitMQ | **23 PASS / 0 FAIL** | — |
+
+Ambos cobrem publicação, contrato, consumo com persistência do estado,
+idempotência no produtor, idempotência na reentrega (o teste republica o mesmo
+evento) e chegada à DLQ com o pedido ainda em `PENDENTE`.
+
+### Desempenho medido
+
+Medido com `scripts/bench_mensageria.py` sobre o caminho real. Números,
+ambiente e limites desta medição em
+[`docs/METRICAS_AULA10.md`](docs/METRICAS_AULA10.md).
+
+| Cenário | 1 consumidor | 3 consumidores |
+| :--- | :--- | :--- |
+| Produção em rajada (200 pedidos) | 11,18 req/s | 11,15 req/s |
+| Latência ponta a ponta p50 / p95 | 64,69 / 67,23 ms | 64,62 / 68,04 ms |
+| Latência ponta a ponta p99 | 68,30 ms | 71,72 ms |
+| Backlog de 1000 msgs drenado | 66,31 msg/s | 80,56 msg/s |
+
+O gargalo da produção é a API (cada `POST` custa ~89 ms, com publicação
+síncrona e `acks=all`), não o consumidor: um worker já acompanha a taxa de 11
+req/s. Escalar o consumo só se pagaria com um produtor mais rápido que o serial.
+
+```bash
+# Latência ponta a ponta com o worker no ar
+python scripts/bench_mensageria.py --modo api --pedidos 200 --rotulo "kafka-1-consumidor"
+
+# Teto de consumo: enche o backlog com o worker parado, depois mede a queda
+docker compose stop pedido-worker
+python scripts/bench_mensageria.py --modo drenagem --fase preencher --pedidos 1000
+python scripts/bench_mensageria.py --modo drenagem --fase medir --espera 300
+```
+
+> **Nota:** o harness é tolerante ao throttle da API (200/min): aguarda a janela
+> expirar uma vez e segue, em vez de descartar da amostra os pedidos lentos, que
+> são justamente a cauda dos percentis.
+
 
 ---
 
-## 14. Variáveis de ambiente
+## 13. Variáveis de ambiente
 
 A configuração dos serviços é feita por variáveis de ambiente. O `docker-compose.yml`
 interpola essas variáveis (`${VAR}`) a partir do arquivo `.env` da raiz do projeto e injeta
@@ -847,17 +925,43 @@ então o ambiente também sobe sem `.env` (com os valores de dev).
 | `CACHE_ENABLED` | `true` | `api` (`config/settings.py` — kill-switch do cache-aside) |
 | `CACHE_TTL_LISTA` | `60` | `api` (`config/settings.py` — TTL da listagem em segundos) |
 | `CACHE_TTL_DETALHE` | `300` | `api` (`config/settings.py` — TTL do detalhe em segundos) |
-| `RABBITMQ_HOST` | `rabbitmq` (Compose) · `localhost` (código) | `api`, `pedido-worker` (`config/settings.py`) |
+| `CACHE_TTL_PEDIDO` | `60` | `api`, `pedido-worker`, `notificacao-worker` (`config/settings.py` — TTL do detalhe do pedido, Aula 11) |
+| `RABBITMQ_HOST` | `rabbitmq` (Compose) · `localhost` (código) | `api`, `pedido-worker`, `notificacao-worker` |
 | `RABBITMQ_PORT` | `5672` | `api`, `pedido-worker` |
 | `RABBITMQ_USER` / `RABBITMQ_PASSWORD` | `guest` / `guest` | `api`, `pedido-worker` |
 | `RABBITMQ_VHOST` | `/` | `api`, `pedido-worker` |
+| `MENSAGERIA_BROKER` | `kafka` | `api`, `pedido-worker`, `notificacao-worker` — broker ativo (`kafka` ou `rabbitmq`) |
 | `MENSAGERIA_ENABLED` | `true` | `api` (`config/settings.py` — kill-switch da publicação) |
+| `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` (código) · `kafka:29092` (Compose) | `api`, `pedido-worker`, scripts |
+| `KAFKA_TOPICO_PEDIDO_CRIADO` | `pedidos.pedidocriado` | `api`, `pedido-worker` |
+| `KAFKA_TOPICO_PEDIDO_CRIADO_DLQ` | `pedidos.pedidocriado.dlq` | `api`, `pedido-worker` |
+| `KAFKA_TOPICO_PAGAMENTO_PROCESSADO` | `pagamentos.pagamentoprocessado` | `api`, `notificacao-worker` (Aula 11) |
+| `KAFKA_TOPICO_PAGAMENTO_PROCESSADO_DLQ` | `pagamentos.pagamentoprocessado.dlq` | `api`, `notificacao-worker` (Aula 11) |
+| `KAFKA_TOPICO_NOTIFICACAO_ENVIADA` | `notificacoes.notificacaoenviada` | `api`, `notificacao-worker` (Aula 11) |
+| `KAFKA_TOPICO_NOTIFICACAO_ENVIADA_DLQ` | `notificacoes.notificacaoenviada.dlq` | `api`, `notificacao-worker` (Aula 11) |
+| `KAFKA_GRUPO_NOTIFICACAO` | `notificacao-worker` | `notificacao-worker` (Aula 11) |
+| `KAFKA_PARTICOES` | `3` | `api`, `pedido-worker`, `notificacao-worker` (paralelismo de consumo) |
+| `KAFKA_REPLICAS` | `1` | `api`, `pedido-worker` (1 = broker único) |
+| `KAFKA_RETENTION_MS` | `604800000` (7 dias) | `api`, `pedido-worker` |
+| `KAFKA_CLEANUP_POLICY` | `delete` | `api`, `pedido-worker` |
+| `KAFKA_GRUPO_CONSUMIDORES` | `pedido-worker` | `pedido-worker` |
+| `KAFKA_AUTO_OFFSET_RESET` | `earliest` | `pedido-worker` |
+| `KAFKA_PRODUCER_ACKS` | `all` | `api`, `pedido-worker` |
+| `KAFKA_PRODUCER_LINGER_MS` | `5` | `api`, `pedido-worker` |
+| `KAFKA_POLL_TIMEOUT_S` | `1.0` | `pedido-worker` |
+| `KAFKA_SESSION_TIMEOUT_MS` | `10000` | `pedido-worker` |
+| `KAFKA_MAX_POLL_INTERVAL_MS` | `300000` | `pedido-worker` |
 | `IDEMPOTENCIA_TTL_SEGUNDOS` | `86400` | `api`, `pedido-worker` (janela de deduplicação) |
 | `MENSAGERIA_MAX_RETRIES` | `3` | `pedido-worker` (reentregas além da 1ª tentativa) |
 | `MENSAGERIA_BACKOFF_BASE_MS` | `250` | `pedido-worker` (base do recuo exponencial) |
 | `MENSAGERIA_BACKOFF_MAX_MS` | `5000` | `pedido-worker` (teto do recuo) |
 | `RABBITMQ_PREFETCH` | `1` | `pedido-worker` (mensagens em voo por consumidor) |
+| `RABBITMQ_FILA_PAGAMENTO_PROCESSADO` / `RABBITMQ_FILA_PAGAMENTO_PROCESSADO_DLQ` | `pagamentos.pagamentoprocessado` / `pagamentos.pagamentoprocessado.dlq` | `api`, `notificacao-worker` (Aula 11) |
+| `RABBITMQ_FILA_NOTIFICACAO_ENVIADA` / `RABBITMQ_FILA_NOTIFICACAO_ENVIADA_DLQ` | `notificacoes.notificacaoenviada` / `notificacoes.notificacaoenviada.dlq` | `api`, `notificacao-worker` (Aula 11) |
+| `RABBITMQ_ROUTING_KEY_PAGAMENTO_PROCESSADO` | `pagamento.processado` | `api`, `notificacao-worker` (Aula 11) |
+| `RABBITMQ_ROUTING_KEY_NOTIFICACAO_ENVIADA` | `notificacao.enviada` | `api`, `notificacao-worker` (Aula 11) |
 | `PEDIDO_WORKER_FALHA_IDEM_KEYS` | (vazio) | `pedido-worker` (padrões `fnmatch` de `idempotency_key` para simular erro) |
+| `NOTIFICACAO_WORKER_FALHA_IDEM_KEYS` | (vazio) | `notificacao-worker` (padrões `fnmatch` para simular erro — aceita `pedido:<id>` ou `pagamento:<id>`) |
 | `LOG_LEVEL_SYNAPSESHOP` | `INFO` | `api`, `pedido-worker` (nível dos logs estruturados) |
 | `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD` / `SEED_ADMIN_EMAIL` | `admin` / `admin` / `admin@synapseshop.local` | `api` (`seed_demo_users`) |
 | `SEED_USER_USERNAME` / `SEED_USER_PASSWORD` / `SEED_USER_EMAIL` | `user` / `user` / `user@synapseshop.local` | `api` (`seed_demo_users`) |
@@ -877,7 +981,7 @@ então o ambiente também sobe sem `.env` (com os valores de dev).
 
 ---
 
-## 13. Documentação & Especificações
+## 14. Documentação & Especificações
 
 | Arquivo | Descrição |
 | :--- | :--- |
@@ -900,6 +1004,12 @@ então o ambiente também sobe sem `.env` (com os valores de dev).
 | [`specs/specs_da_aula_9.md`](specs/specs_da_aula_9.md) | Mensageria assíncrona e filas com RabbitMQ. |
 | [`docs/DECISOES_TECNICAS_AULA9.md`](docs/DECISOES_TECNICAS_AULA9.md) | Decisões de broker, contrato, idempotência e política de falha (Aula 9). |
 | [`docs/METRICAS_AULA9.md`](docs/METRICAS_AULA9.md) | Tempos de execução, tentativas e evidências da DLQ (Aula 9). |
+| [`specs/specs_da_aula_10.md`](specs/specs_da_aula_10.md) | Kafka na Camada 5: partições, offsets manuais, reentrega, DLQ e métricas. |
+| [`docs/DECISOES_TECNICAS_AULA10.md`](docs/DECISOES_TECNICAS_AULA10.md) | Decisões de topologia, partições, commit, idempotência e DLQ (Aula 10). |
+| [`docs/METRICAS_AULA10.md`](docs/METRICAS_AULA10.md) | Latência ponta a ponta, throughput de consumo e efeito do paralelismo (Aula 10). |
+| [`specs/specs_da_aula_11.md`](specs/specs_da_aula_11.md) | Pedido → Pagamento → Notificação com eventos, cache do pedido e healthchecks. |
+| [`docs/DECISOES_TECNICAS_AULA11.md`](docs/DECISOES_TECNICAS_AULA11.md) | Decisões da Aula 11: contratos, topologia, cache, DLQ e fluxo completo. |
+| [`docs/METRICAS_AULA11.md`](docs/METRICAS_AULA11.md) | Evidências do fluxo completo, cache, idempotência e DLQ (Aula 11). |
 | [`.env.example`](.env.example) | Modelo versionado das variáveis de ambiente. |
 | [`PROMPTS-TEMPLATE.md`](PROMPTS-TEMPLATE.md) | Template padrão de prompts de IA da squad. |
 | [`docs/CHECKLIST_IA_SAFE.md`](docs/CHECKLIST_IA_SAFE.md) | Checklist de revisão de código gerado por IA. |

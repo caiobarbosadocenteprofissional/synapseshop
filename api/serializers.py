@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
-from repositories.models import Category, Item, Pedido, PedidoItem
+from repositories.models import Category, Item, Notificacao, Pagamento, Pedido, PedidoItem
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -93,8 +93,69 @@ class PedidoItemSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class PagamentoCreateSerializer(serializers.Serializer):
+    """Entrada de ``POST /api/v1/pedidos/<id>/pagamento/``.
+
+    ``resultado`` é a **simulação** do adquirente: o cliente informa o desfecho
+    que quer observar. O default é ``APROVADO`` para que a chamada mínima
+    (``{}``) produza o caminho feliz do fluxo.
+
+    Não há ``idempotency_key`` aqui de propósito: o pagamento é único por pedido
+    (``OneToOne``), e a repetição da requisição já é resolvida pela estrutura do
+    banco — devolver 200 com o pagamento existente, sem publicar evento novo.
+    """
+
+    resultado = serializers.ChoiceField(
+        choices=Pagamento.Status.choices,
+        default=Pagamento.Status.APROVADO,
+        required=False,
+    )
+    forma_pagamento = serializers.ChoiceField(
+        choices=Pagamento.Formas.choices,
+        default=Pagamento.Formas.CARTAO_CREDITO,
+        required=False,
+    )
+
+    def validate_resultado(self, value):
+        return str(value).upper()
+
+
+class PagamentoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Pagamento
+        fields = [
+            "id",
+            "pedido",
+            "status",
+            "valor",
+            "forma_pagamento",
+            "referencia",
+            "processado_em",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class NotificacaoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Notificacao
+        fields = [
+            "id",
+            "pedido",
+            "pagamento",
+            "canal",
+            "destinatario",
+            "assunto",
+            "conteudo",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
 class PedidoSerializer(serializers.ModelSerializer):
     itens = PedidoItemSerializer(many=True, read_only=True)
+    pagamento = PagamentoSerializer(read_only=True)
+    notificacoes = NotificacaoSerializer(many=True, read_only=True)
 
     class Meta:
         model = Pedido
@@ -104,8 +165,11 @@ class PedidoSerializer(serializers.ModelSerializer):
             "status",
             "total",
             "idempotency_key",
+            "correlation_id",
             "processado_em",
             "created_at",
             "itens",
+            "pagamento",
+            "notificacoes",
         ]
         read_only_fields = fields
