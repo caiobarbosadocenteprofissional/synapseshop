@@ -209,6 +209,12 @@ class PedidoCreateView(APIView):
 
     Idempotência no produtor: repetir a mesma ``idempotency_key`` devolve o
     pedido já existente com **200**, sem novo pedido e sem novo evento.
+
+    A ``idempotency_key`` também pode vir no cabeçalho ``Idempotency-Key``
+    (a Aula 13 documenta os dois formatos; o corpo tem precedência). O
+    cabeçalho ``X-Trace-Id``, quando presente, vira o ``correlation_id`` do
+    fluxo e é ecoado na resposta 201 — é o gancho de rastreio usado pelos
+    integradores externos.
     """
 
     permission_classes = [permissions.IsAuthenticated]
@@ -218,7 +224,11 @@ class PedidoCreateView(APIView):
         serializer.is_valid(raise_exception=True)
         dados = serializer.validated_data
 
-        idempotency_key = dados["idempotency_key"] or f"pedido-{uuid4().hex}"
+        idempotency_key = (
+            dados.get("idempotency_key")
+            or (request.headers.get("Idempotency-Key") or "").strip()
+            or f"pedido-{uuid4().hex}"
+        )
         existente = Pedido.objects.filter(idempotency_key=idempotency_key).first()
         if existente is not None:
             _log_pedido(
@@ -241,6 +251,7 @@ class PedidoCreateView(APIView):
         for linha in dados["itens"]:
             total += itens_catalogo[linha["item_id"]].price * linha["quantidade"]
 
+        correlation_id = request.headers.get("X-Trace-Id") or str(uuid4())
         try:
             with transaction.atomic():
                 pedido = Pedido.objects.create(
@@ -251,7 +262,7 @@ class PedidoCreateView(APIView):
                     # Identificador que atravessa pagamento e notificação: sem ele,
                     # cada evento da cadeia teria um id próprio e os logs não
                     # permitiriam ler o fluxo inteiro de um pedido.
-                    correlation_id=str(uuid4()),
+                    correlation_id=correlation_id,
                 )
                 PedidoItem.objects.bulk_create(
                     [
@@ -315,7 +326,9 @@ class PedidoCreateView(APIView):
             # informa que o processamento ainda vai acontecer (a fila pode
             # ser reprocessada pela chave de idempotência) sem prometer estado.
             return Response({**corpo, "evento_publicado": False}, status=202)
-        return Response({**corpo, "evento_publicado": True}, status=201)
+        resposta = Response({**corpo, "evento_publicado": True}, status=201)
+        resposta["X-Trace-Id"] = correlation_id
+        return resposta
 
 
 class PagamentoView(APIView):

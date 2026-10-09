@@ -1,0 +1,525 @@
+{
+  "info": {
+    "_postman_id": "b6f1c2a4-4a0e-4d1e-9c3a-synapseshop13a",
+    "name": "SynapseShop — API v1 (Aula 13)",
+    "description": "Coleção da Aula 13: documentação da API e o fluxo ponta a ponta (pedido ➔ pagamento ➔ notificação) exercitados por fora, com os cabeçalhos de contrato `Idempotency-Key` e `X-Trace-Id`. Requer os usuários demo criados por `python manage.py seed_demo_users`. Rote os cenários na ordem das pastas: Documentação ➔ Health ➔ Auth ➔ Catálogo ➔ Fluxo de Pedido ➔ Cache.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8000" },
+    { "key": "admin_username", "value": "admin" },
+    { "key": "admin_password", "value": "admin" },
+    { "key": "user_username", "value": "user" },
+    { "key": "user_password", "value": "user" },
+    { "key": "admin_token", "value": "" },
+    { "key": "user_token", "value": "" },
+    { "key": "category_id", "value": "1" },
+    { "key": "item_id", "value": "1" },
+    { "key": "pedido_id", "value": "" },
+    { "key": "idempotency_key", "value": "pedido-aula13-001" },
+    { "key": "trace_id", "value": "3f1a9c2e-6b4d-4c7a-9f10-2d8e5b7c0a11" }
+  ],
+  "item": [
+    {
+      "name": "Documentação",
+      "item": [
+        {
+          "name": "GET /docs/ — Swagger UI",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Página do Swagger UI', () => pm.expect(pm.response.text()).to.include('swagger-ui'));",
+                  "pm.test('Aponta para /openapi.yaml', () => pm.expect(pm.response.text()).to.include('/openapi.yaml'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/docs/",
+              "host": ["{{base_url}}"],
+              "path": ["docs"]
+            }
+          }
+        },
+        {
+          "name": "GET /docs/redoc/ — ReDoc",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Página do ReDoc', () => pm.expect(pm.response.text().toLowerCase()).to.include('redoc'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/docs/redoc/",
+              "host": ["{{base_url}}"],
+              "path": ["docs", "redoc"]
+            }
+          }
+        },
+        {
+          "name": "GET /openapi.yaml — contrato",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('É um documento OpenAPI 3.0.3', () => pm.expect(pm.response.text()).to.include('openapi: 3.0.3'));",
+                  "pm.test('Documenta o endpoint de pedidos', () => pm.expect(pm.response.text()).to.include('/api/v1/pedidos/'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/openapi.yaml",
+              "host": ["{{base_url}}"],
+              "path": ["openapi.yaml"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "GET /health — liveness",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Body status ok', () => pm.expect(pm.response.json().status).to.eql('ok'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            }
+          }
+        },
+        {
+          "name": "GET /health/pronto — readiness",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK (dependências de pé)', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Campo pronto = true', () => pm.expect(body.pronto).to.be.true);",
+                  "pm.test('Detalha as dependências', () => pm.expect(body).to.have.property('dependencias'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health/pronto",
+              "host": ["{{base_url}}"],
+              "path": ["health", "pronto"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth (JWT)",
+      "item": [
+        {
+          "name": "POST /api/v1/auth/token/ — login admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Claim role = admin', () => pm.expect(body.role).to.eql('admin'));",
+                  "pm.collectionVariables.set('admin_token', body.access);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": { "Content-Type": "application/json" },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"username\": \"{{admin_username}}\",\n    \"password\": \"{{admin_password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/token/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "token"]
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/auth/token/ — login user",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('user_token', pm.response.json().access);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": { "Content-Type": "application/json" },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"username\": \"{{user_username}}\",\n    \"password\": \"{{user_password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/token/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "token"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Catálogo",
+      "item": [
+        {
+          "name": "POST /api/v1/categories/ — criar categoria (admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201 Created', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('category_id', String(pm.response.json().id));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer {{admin_token}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"Eletronicos\",\n    \"description\": \"Produtos eletronicos\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/categories/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "categories"]
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/items/ — criar item (admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201 Created', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('item_id', String(pm.response.json().id));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer {{admin_token}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"Notebook 16GB\",\n    \"description\": \"Notebook de alto desempenho\",\n    \"price\": \"4999.90\",\n    \"category\": {{category_id}},\n    \"is_active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/items/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "items"]
+            }
+          }
+        },
+        {
+          "name": "GET /api/v1/items/ — listar com filtros",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope de paginação', () => pm.expect(pm.response.json()).to.have.property('results'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": { "Authorization": "Bearer {{user_token}}" },
+            "url": {
+              "raw": "{{base_url}}/api/v1/items/?search=Notebook&is_active=true&category={{category_id}}&ordering=price",
+              "host": ["{{base_url}}"],
+              "query": [
+                { "key": "search", "value": "Notebook" },
+                { "key": "is_active", "value": "true" },
+                { "key": "category", "value": "{{category_id}}" },
+                { "key": "ordering", "value": "price" }
+              ],
+              "path": ["api", "v1", "items"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Fluxo de Pedido",
+      "item": [
+        {
+          "name": "POST /api/v1/pedidos/ — criar (Idempotency-Key + X-Trace-Id)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201 Created (evento publicado)', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.test('Evento publicado', () => pm.expect(body.evento_publicado).to.be.true);",
+                  "pm.test('X-Trace-Id ecoado na resposta', () => pm.expect(pm.response.headers.get('X-Trace-Id')).to.eql(pm.collectionVariables.get('trace_id')));",
+                  "pm.test('Correlation id igual ao X-Trace-Id', () => pm.expect(body.correlation_id).to.eql(pm.collectionVariables.get('trace_id')));",
+                  "pm.collectionVariables.set('pedido_id', String(body.id));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer {{user_token}}",
+              "Idempotency-Key": "{{idempotency_key}}",
+              "X-Trace-Id": "{{trace_id}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"itens\": [\n        { \"item_id\": {{item_id}}, \"quantidade\": 2 }\n    ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/pedidos/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "pedidos"]
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/pedidos/ — repetir (idempotente, 200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK (pedido existente)', () => pm.response.to.have.status(200));",
+                  "pm.test('Mesmo pedido', () => pm.expect(String(pm.response.json().id)).to.eql(pm.collectionVariables.get('pedido_id')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer {{user_token}}",
+              "Idempotency-Key": "{{idempotency_key}}",
+              "X-Trace-Id": "{{trace_id}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"itens\": [\n        { \"item_id\": {{item_id}}, \"quantidade\": 2 }\n    ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/pedidos/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "pedidos"]
+            }
+          }
+        },
+        {
+          "name": "GET /api/v1/pedidos/{{pedido_id}}/ — consultar (cache)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('X-Cache presente', () => pm.expect(['HIT', 'MISS', 'BYPASS']).to.include(pm.response.headers.get('X-Cache')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": { "Authorization": "Bearer {{user_token}}" },
+            "url": {
+              "raw": "{{base_url}}/api/v1/pedidos/{{pedido_id}}/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "pedidos", "{{pedido_id}}"]
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/pedidos/{{pedido_id}}/pagamento/ — pagar",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201 Created', () => pm.response.to.have.status(201));",
+                  "pm.test('Evento publicado', () => pm.expect(pm.response.json().evento_publicado).to.be.true);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer {{user_token}}",
+              "X-Trace-Id": "{{trace_id}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"resultado\": \"APROVADO\",\n    \"forma_pagamento\": \"pix\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/pedidos/{{pedido_id}}/pagamento/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "pedidos", "{{pedido_id}}", "pagamento"]
+            }
+          }
+        },
+        {
+          "name": "GET /api/v1/notificacoes/ — ver a notificação gerada",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope de paginação', () => pm.expect(pm.response.json()).to.have.property('results'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": { "Authorization": "Bearer {{user_token}}" },
+            "url": {
+              "raw": "{{base_url}}/api/v1/notificacoes/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "notificacoes"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cache",
+      "item": [
+        {
+          "name": "GET /api/v1/cache/stats/ — métricas (admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Traz hit rate global', () => pm.expect(pm.response.json()).to.have.property('hit_rate'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": { "Authorization": "Bearer {{admin_token}}" },
+            "url": {
+              "raw": "{{base_url}}/api/v1/cache/stats/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "cache", "stats"]
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/cache/stats/ — zerar contadores (admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": { "Authorization": "Bearer {{admin_token}}" },
+            "url": {
+              "raw": "{{base_url}}/api/v1/cache/stats/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "cache", "stats"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

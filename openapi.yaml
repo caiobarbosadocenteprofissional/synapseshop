@@ -1,0 +1,1252 @@
+openapi: 3.0.3
+
+info:
+  title: SynapseShop API
+  version: 1.0.0
+  description: |
+    Contrato OpenAPI da **API principal do SynapseShop** (Django REST Framework),
+    entregue na Aula 13. A API cobre o catálogo (categorias e itens), o fluxo de
+    pedidos (`Pedido ➔ Pagamento ➔ Notificação`), a autenticação JWT por papéis e
+    a observabilidade (health, cache e notificações).
+
+    O **microsserviço de inventário** (FastAPI, porta `8100`) possui documentação
+    própria gerada automaticamente e acessível em `http://localhost:8100/docs`
+    (Swagger UI) e `http://localhost:8100/redoc` (ReDoc). Ele não é reproduzido
+    neste arquivo para manter cada contrato na sua fonte de verdade.
+
+    **Interfaces interativas desta API:**
+    - Swagger UI: `http://localhost:8000/docs/`
+    - ReDoc: `http://localhost:8000/docs/redoc/`
+
+    **Convenções adotadas** (detalhadas em `docs/CONVENCOES_API.md`):
+    - Paginação por número de página (`page`, `page_size`); a equipe adota
+      também o vocabulário padrão `limit`/`nextCursor` para evoluções futuras.
+    - Ordenação por `ordering` (prefixo `-` para decrescente), equivalente a
+      `sort=campo:asc|desc`.
+    - Filtros por query string (`search`, `is_active`, `category`).
+    - Erros padronizados no esquema `Problem`, inspirado na RFC 7807
+      (`application/problem+json`).
+    - Cabeçalhos obrigatórios: `Authorization` (Bearer JWT), `Idempotency-Key`
+      e `X-Trace-Id`.
+  contact:
+    name: SynapseTech
+    url: https://github.com/caiobarbosadocenteprofissional/synapseshop
+  license:
+    name: Uso educacional (SynapseTech)
+    url: https://github.com/caiobarbosadocenteprofissional/synapseshop
+
+servers:
+  - url: http://localhost:8000
+    description: API principal (Django REST Framework) no Docker Compose local.
+  - url: https://api.synapseshop.local
+    description: Ambiente de referência (ilustrativo; não provisionado).
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Health
+    description: Liveness e readiness do serviço.
+  - name: Autenticação
+    description: Emissão e renovação de tokens JWT.
+  - name: Categorias
+    description: CRUD de categorias do catálogo.
+  - name: Itens
+    description: CRUD de itens do catálogo, com cache-aside na leitura.
+  - name: Pedidos
+    description: Criação e consulta de pedidos e o fluxo de pagamento.
+  - name: Pagamentos
+    description: Simulação de pagamento de um pedido.
+  - name: Notificações
+    description: Notificações gravadas pelo consumidor de eventos.
+  - name: Cache
+    description: Métricas de eficácia do cache-aside (restrito ao papel admin).
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Liveness do serviço
+      description: Responde enquanto o processo consegue atender. É o healthcheck do Docker Compose e não consulta dependências externas.
+      operationId: getHealth
+      security: []
+      responses:
+        '200':
+          description: Processo no ar.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+              example:
+                status: ok
+
+  /health/pronto:
+    get:
+      tags: [Health]
+      summary: Readiness do serviço
+      description: Verifica PostgreSQL, Redis e o broker de mensageria. Responde `503` enquanto alguma dependência estiver fora do ar.
+      operationId: getHealthPronto
+      security: []
+      responses:
+        '200':
+          description: Todas as dependências respondem.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthPronto'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/auth/token/:
+    post:
+      tags: [Autenticação]
+      summary: Autentica e obtém os tokens JWT
+      operationId: createToken
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenObtain'
+            example:
+              username: admin
+              password: admin
+      responses:
+        '200':
+          description: Token emitido. A claim `role` acompanha o corpo da resposta.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenPair'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/v1/auth/token/refresh/:
+    post:
+      tags: [Autenticação]
+      summary: Renova o access token
+      operationId: refreshToken
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenRefresh'
+            example:
+              refresh: "<refresh_token>"
+      responses:
+        '200':
+          description: Novo access token emitido.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenRefreshResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/v1/categories/:
+    get:
+      tags: [Categorias]
+      summary: Lista categorias (paginado)
+      operationId: listCategories
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Search'
+        - $ref: '#/components/parameters/Ordering'
+      responses:
+        '200':
+          description: Página de categorias.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedCategoryList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    post:
+      tags: [Categorias]
+      summary: Cria uma categoria (admin)
+      operationId: createCategory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CategoryWrite'
+            example:
+              name: Eletronicos
+              description: Produtos eletronicos
+      responses:
+        '201':
+          description: Categoria criada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Category'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/v1/categories/{id}/:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Categorias]
+      summary: Detalha uma categoria
+      operationId: retrieveCategory
+      responses:
+        '200':
+          description: Categoria encontrada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Category'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Categorias]
+      summary: Substitui uma categoria (admin)
+      operationId: updateCategory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CategoryWrite'
+      responses:
+        '200':
+          description: Categoria atualizada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Category'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Categorias]
+      summary: Atualiza parcialmente uma categoria (admin)
+      operationId: partialUpdateCategory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CategoryWrite'
+      responses:
+        '200':
+          description: Categoria atualizada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Category'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Categorias]
+      summary: Remove uma categoria (admin)
+      operationId: deleteCategory
+      responses:
+        '204':
+          description: Categoria removida.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/items/:
+    get:
+      tags: [Itens]
+      summary: Lista itens (paginado, com cache)
+      description: A listagem usa cache-aside; o cabeçalho de resposta `X-Cache` indica `HIT`, `MISS` ou `BYPASS`.
+      operationId: listItems
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Search'
+        - $ref: '#/components/parameters/Ordering'
+        - $ref: '#/components/parameters/IsActiveFilter'
+        - $ref: '#/components/parameters/CategoryFilter'
+      responses:
+        '200':
+          description: Página de itens.
+          headers:
+            X-Cache:
+              $ref: '#/components/headers/XCache'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedItemList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    post:
+      tags: [Itens]
+      summary: Cria um item (admin)
+      operationId: createItem
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ItemWrite'
+            example:
+              name: Notebook 16GB
+              description: Notebook de alto desempenho
+              price: "4999.90"
+              category: 1
+              is_active: true
+      responses:
+        '201':
+          description: Item criado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Item'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/v1/items/{id}/:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Itens]
+      summary: Detalha um item (com cache)
+      operationId: retrieveItem
+      responses:
+        '200':
+          description: Item encontrado.
+          headers:
+            X-Cache:
+              $ref: '#/components/headers/XCache'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Item'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Itens]
+      summary: Substitui um item (admin)
+      operationId: updateItem
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ItemWrite'
+      responses:
+        '200':
+          description: Item atualizado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Item'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Itens]
+      summary: Atualiza parcialmente um item (admin)
+      operationId: partialUpdateItem
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ItemWrite'
+      responses:
+        '200':
+          description: Item atualizado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Item'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Itens]
+      summary: Remove um item (admin)
+      operationId: deleteItem
+      responses:
+        '204':
+          description: Item removido.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/cache/stats/:
+    get:
+      tags: [Cache]
+      summary: Consulta as métricas do cache-aside (admin)
+      operationId: getCacheStats
+      responses:
+        '200':
+          description: Hit rate por endpoint e global.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CacheStats'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Cache]
+      summary: Zera os contadores do cache-aside (admin)
+      operationId: resetCacheStats
+      responses:
+        '200':
+          description: Contadores zerados; devolve o estado inicial.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CacheStats'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/pedidos/:
+    post:
+      tags: [Pedidos]
+      summary: Cria um pedido e publica o evento `PedidoCriado`
+      description: |
+        O total e o preço unitário são calculados no servidor a partir do catálogo.
+        A `idempotency_key` pode ser enviada no corpo (`idempotency_key`) ou no
+        cabeçalho `Idempotency-Key`; repetir a chave devolve o mesmo pedido com
+        `200`, sem criar outro e sem publicar novo evento. Quando o broker recusa
+        a publicação, a resposta é `202` com `evento_publicado: false`.
+      operationId: createPedido
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/XTraceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PedidoCreate'
+            example:
+              idempotency_key: pedido-2026-0001
+              itens:
+                - item_id: 622
+                  quantidade: 2
+      responses:
+        '201':
+          description: Pedido criado e evento publicado.
+          headers:
+            X-Trace-Id:
+              $ref: '#/components/headers/XTraceId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PedidoComEvento'
+        '200':
+          description: Pedido já existente para a `idempotency_key` (sem novo evento).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PedidoComEvento'
+        '202':
+          description: Pedido persistido, mas o evento não foi publicado pelo broker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PedidoComEvento'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/v1/pedidos/{id}/:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Pedidos]
+      summary: Detalha um pedido (dono ou admin)
+      description: Resposta cacheada em `pedido:<id>`; o cabeçalho `X-Cache` indica a origem.
+      operationId: getPedido
+      responses:
+        '200':
+          description: Pedido encontrado.
+          headers:
+            X-Cache:
+              $ref: '#/components/headers/XCache'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pedido'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/pedidos/{id}/pagamento/:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      tags: [Pagamentos]
+      summary: Simula o pagamento de um pedido
+      description: |
+        Simula a resposta de um adquirente. `APROVADO` move o pedido para `PAGO`;
+        `RECUSADO` o move para `CANCELADO`. Repetir a chamada devolve `200` com o
+        pagamento existente e **não publica evento novo** (a unicidade é do banco).
+      operationId: createPagamento
+      parameters:
+        - $ref: '#/components/parameters/XTraceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PagamentoCreate'
+            example:
+              resultado: APROVADO
+              forma_pagamento: pix
+      responses:
+        '201':
+          description: Pagamento registrado e evento `PagamentoProcessado` publicado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagamentoComEvento'
+        '200':
+          description: Pagamento já existente (sem novo evento).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagamentoComEvento'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/v1/notificacoes/:
+    get:
+      tags: [Notificações]
+      summary: Lista as notificações do usuário autenticado (paginado)
+      description: Gravadas pelo `notificacao-worker` a partir do evento `PagamentoProcessado`.
+      operationId: listNotificacoes
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Página de notificações.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedNotificacaoList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Token JWT obtido em `POST /api/v1/auth/token/`. Envie no cabeçalho
+        `Authorization: Bearer <access_token>`. A claim `role` (`admin`/`user`)
+        define as permissões de escrita.
+
+  parameters:
+    Page:
+      name: page
+      in: query
+      description: Número da página (base 1).
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+      example: 1
+    PageSize:
+      name: page_size
+      in: query
+      description: Itens por página. Vocabulário padrão alternativo `limit` em `docs/CONVENCOES_API.md`.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 10
+      example: 10
+    Search:
+      name: search
+      in: query
+      description: Busca textual nos campos indexados do recurso.
+      schema:
+        type: string
+      example: Notebook
+    Ordering:
+      name: ordering
+      in: query
+      description: |
+        Campo de ordenação; prefixe com `-` para ordem decrescente
+        (`ordering=-created_at`). Equivale à convenção `sort=campo:desc`.
+      schema:
+        type: string
+      example: -created_at
+    IsActiveFilter:
+      name: is_active
+      in: query
+      description: Filtra itens ativos (`true`) ou inativos (`false`).
+      schema:
+        type: boolean
+      example: true
+    CategoryFilter:
+      name: category
+      in: query
+      description: Filtra itens pela categoria (`id`).
+      schema:
+        type: integer
+      example: 1
+    Id:
+      name: id
+      in: path
+      description: Identificador do recurso.
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+      example: 1
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: |
+        Chave de idempotência da operação. Alternativa ao campo `idempotency_key`
+        do corpo; repetir a chave devolve o mesmo pedido sem duplicar efeitos.
+      schema:
+        type: string
+        maxLength: 64
+      example: pedido-2026-0001
+    XTraceId:
+      name: X-Trace-Id
+      in: header
+      required: false
+      description: |
+        Identificador de correlação propagado nos logs. Quando informado na
+        criação do pedido, é usado como `correlation_id` da cadeia
+        pedido ➔ pagamento ➔ notificação.
+      schema:
+        type: string
+        maxLength: 36
+      example: 3f1a9c2e-6b4d-4c7a-9f10-2d8e5b7c0a11
+
+  headers:
+    XCache:
+      description: Desfecho da consulta ao cache-aside.
+      schema:
+        type: string
+        enum: [HIT, MISS, BYPASS]
+    XTraceId:
+      description: Identificador de correlação ecoado na resposta.
+      schema:
+        type: string
+
+  responses:
+    BadRequest:
+      description: Requisição inválida (validação de campos ou de contrato).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            detail: O nome da categoria é obrigatório.
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unauthorized:
+      description: Autenticação ausente ou credenciais inválidas.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            detail: As credenciais de autenticação não foram fornecidas.
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Forbidden:
+      description: Usuário autenticado sem o papel necessário (`admin`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            detail: Você não tem permissão para executar essa ação.
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: Recurso não encontrado.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            detail: Não encontrado.
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Conflict:
+      description: Conflito de estado (por exemplo, chave de idempotência em corrida).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            detail: Conflito ao registrar o pedido.
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    TooManyRequests:
+      description: Limite de requisições excedido (throttling).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            detail: Request was throttled. Expected available in 60 seconds.
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    ServiceUnavailable:
+      description: Uma ou mais dependências não respondem (readiness degradada).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/HealthPronto'
+
+  schemas:
+    Problem:
+      type: object
+      description: |
+        Esquema padrão de erros inspirado na RFC 7807 (`application/problem+json`).
+        A implementação atual responde o subconjunto `detail` (e erros de campo),
+        que é compatível com este esquema.
+      properties:
+        type:
+          type: string
+          format: uri
+          default: about:blank
+          description: URI que identifica o tipo do problema.
+        title:
+          type: string
+          description: Resumo legível do tipo do problema.
+        status:
+          type: integer
+          format: int32
+          minimum: 100
+          maximum: 599
+          description: Código HTTP.
+        detail:
+          type: string
+          description: Explicação específica da ocorrência.
+        instance:
+          type: string
+          format: uri-reference
+          description: URI da ocorrência específica.
+        errors:
+          type: array
+          description: Lista de erros de validação por campo.
+          items:
+            type: object
+            properties:
+              campo:
+                type: string
+              codigo:
+                type: string
+              mensagem:
+                type: string
+      example:
+        type: about:blank
+        title: Requisição inválida
+        status: 400
+        detail: O campo 'name' é obrigatório.
+
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: ok
+
+    HealthPronto:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok, degradado]
+        pronto:
+          type: boolean
+        broker_selecionado:
+          type: string
+          enum: [kafka, rabbitmq]
+        mensageria_habilitada:
+          type: boolean
+        cache_habilitado:
+          type: boolean
+        dependencias:
+          type: object
+          description: Estado de cada dependência verificada em isolamento.
+          additionalProperties:
+            type: object
+            properties:
+              ok:
+                type: boolean
+              duracao_ms:
+                type: number
+              erro:
+                type: string
+              observacao:
+                type: string
+              broker:
+                type: string
+              alvo:
+                type: string
+        fora_do_ar:
+          type: array
+          items:
+            type: string
+
+    TokenObtain:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          example: admin
+        password:
+          type: string
+          format: password
+          example: admin
+
+    TokenPair:
+      type: object
+      required: [access, refresh]
+      properties:
+        access:
+          type: string
+          description: Access token JWT.
+        refresh:
+          type: string
+          description: Refresh token JWT.
+        role:
+          type: string
+          enum: [admin, user]
+          description: Papel do usuário, extraído da claim `role`.
+
+    TokenRefresh:
+      type: object
+      required: [refresh]
+      properties:
+        refresh:
+          type: string
+
+    TokenRefreshResponse:
+      type: object
+      properties:
+        access:
+          type: string
+        role:
+          type: string
+          enum: [admin, user]
+
+    Category:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+          example: 1
+        name:
+          type: string
+          maxLength: 120
+          example: Eletronicos
+        description:
+          type: string
+          example: Produtos eletronicos
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+
+    CategoryWrite:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          maxLength: 120
+          example: Eletronicos
+        description:
+          type: string
+          example: Produtos eletronicos
+
+    Item:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+          example: 622
+        name:
+          type: string
+          maxLength: 200
+          example: Notebook 16GB
+        description:
+          type: string
+        price:
+          type: string
+          pattern: '^\d+(\.\d{1,2})?$'
+          description: Preço serializado como string (Decimal) para não perder precisão.
+          example: "4999.90"
+        category:
+          type: integer
+          example: 1
+        category_name:
+          type: string
+          readOnly: true
+          example: Eletronicos
+        is_active:
+          type: boolean
+          default: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+
+    ItemWrite:
+      type: object
+      required: [name, price, category]
+      properties:
+        name:
+          type: string
+          maxLength: 200
+          example: Notebook 16GB
+        description:
+          type: string
+        price:
+          type: string
+          pattern: '^\d+(\.\d{1,2})?$'
+          example: "4999.90"
+        category:
+          type: integer
+          example: 1
+        is_active:
+          type: boolean
+          default: true
+
+    PedidoItemInput:
+      type: object
+      required: [item_id, quantidade]
+      properties:
+        item_id:
+          type: integer
+          example: 622
+        quantidade:
+          type: integer
+          minimum: 1
+          maximum: 999
+          example: 2
+
+    PedidoCreate:
+      type: object
+      required: [itens]
+      properties:
+        idempotency_key:
+          type: string
+          maxLength: 64
+          description: Chave de negócio do pedido. Alternativa ao cabeçalho `Idempotency-Key`.
+          example: pedido-2026-0001
+        itens:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/PedidoItemInput'
+
+    PedidoItem:
+      type: object
+      properties:
+        item_id:
+          type: integer
+        nome_item:
+          type: string
+        quantidade:
+          type: integer
+        preco_unitario:
+          type: string
+          pattern: '^\d+(\.\d{1,2})?$'
+
+    Pagamento:
+      type: object
+      properties:
+        id:
+          type: integer
+        pedido:
+          type: integer
+        status:
+          type: string
+          enum: [APROVADO, RECUSADO]
+        valor:
+          type: string
+          pattern: '^\d+(\.\d{1,2})?$'
+        forma_pagamento:
+          type: string
+          enum: [cartao_credito, cartao_debito, pix, boleto]
+        referencia:
+          type: string
+          description: Referência única da transação simulada.
+        processado_em:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    PagamentoCreate:
+      type: object
+      properties:
+        resultado:
+          type: string
+          enum: [APROVADO, RECUSADO]
+          default: APROVADO
+          description: Desfecho simulado do adquirente.
+        forma_pagamento:
+          type: string
+          enum: [cartao_credito, cartao_debito, pix, boleto]
+          default: cartao_credito
+
+    Notificacao:
+      type: object
+      properties:
+        id:
+          type: integer
+        pedido:
+          type: integer
+        pagamento:
+          type: integer
+        canal:
+          type: string
+          enum: [EMAIL, SMS, WHATSAPP]
+        destinatario:
+          type: string
+        assunto:
+          type: string
+        conteudo:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    Pedido:
+      type: object
+      properties:
+        id:
+          type: integer
+        usuario:
+          type: integer
+        status:
+          type: string
+          enum: [PENDENTE, PROCESSANDO, PAGO, CANCELADO, FALHA]
+        total:
+          type: string
+          pattern: '^\d+(\.\d{1,2})?$'
+        idempotency_key:
+          type: string
+        correlation_id:
+          type: string
+          description: Identificador que atravessa pedido, pagamento e notificação.
+        processado_em:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        itens:
+          type: array
+          items:
+            $ref: '#/components/schemas/PedidoItem'
+        pagamento:
+          allOf:
+            - $ref: '#/components/schemas/Pagamento'
+          nullable: true
+        notificacoes:
+          type: array
+          items:
+            $ref: '#/components/schemas/Notificacao'
+
+    PedidoComEvento:
+      allOf:
+        - $ref: '#/components/schemas/Pedido'
+        - type: object
+          properties:
+            evento_publicado:
+              type: boolean
+              description: Indica se o evento foi aceito pelo broker.
+
+    PagamentoComEvento:
+      allOf:
+        - $ref: '#/components/schemas/Pagamento'
+        - type: object
+          properties:
+            evento_publicado:
+              type: boolean
+
+    PaginatedCategoryList:
+      type: object
+      properties:
+        count:
+          type: integer
+        next:
+          type: string
+          format: uri
+          nullable: true
+        previous:
+          type: string
+          format: uri
+          nullable: true
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Category'
+
+    PaginatedItemList:
+      type: object
+      properties:
+        count:
+          type: integer
+        next:
+          type: string
+          format: uri
+          nullable: true
+        previous:
+          type: string
+          format: uri
+          nullable: true
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Item'
+
+    PaginatedNotificacaoList:
+      type: object
+      properties:
+        count:
+          type: integer
+        next:
+          type: string
+          format: uri
+          nullable: true
+        previous:
+          type: string
+          format: uri
+          nullable: true
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Notificacao'
+
+    CacheStats:
+      type: object
+      properties:
+        cache_habilitado:
+          type: boolean
+        endpoints:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              hits:
+                type: integer
+              misses:
+                type: integer
+              total_lookups:
+                type: integer
+              hit_rate:
+                type: number
+                format: float
+              ttl_segundos:
+                type: integer
+        total_hits:
+          type: integer
+        total_misses:
+          type: integer
+        total_lookups:
+          type: integer
+        hit_rate:
+          type: number
+          format: float
