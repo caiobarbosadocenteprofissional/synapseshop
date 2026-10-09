@@ -16,3 +16,10 @@ pika==1.3.*
 # Aula 10: cliente Kafka (librdkafka) — mesmo par produtor/consumidor, com chave
 # de partição, semântica de offset explícita e topologia declarada pela aplicação.
 confluent-kafka==2.*
+# Aula 12: ferramentas da suíte de testes. Ficam no requirements.txt (e não em um
+# arquivo dev separado) porque a spec exige rodar `pytest --cov` **dentro do
+# contêiner**, cuja imagem é construída a partir deste arquivo.
+pytest==9.1.*
+pytest-django==4.14.*
+pytest-cov==7.1.*
+freezegun==1.5.*

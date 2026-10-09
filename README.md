@@ -898,7 +898,54 @@ python scripts/bench_mensageria.py --modo drenagem --fase medir --espera 300
 
 ---
 
-## 13. Variáveis de ambiente
+## 13. Testes Automatizados (Aula 12)
+
+Suíte `pytest` organizada em `tests/unit` (ramos felizes e de erro, parametrizados)
+e `tests/integration` (ciclo de vida completo dos recursos na API), com cobertura
+global mínima de **85%** (.coveragerc). A execução atual mede **99,91%** do código
+aplicacional de `services`, `events`, `api`, `config` e `repositories`.
+
+### Execução
+
+```bash
+python -m pytest                       # suíte completa (unit + integration)
+python -m pytest tests/unit            # somente unitários
+python -m pytest tests/integration     # somente integração
+pytest --cov --cov-report=term-missing # relatório detalhado linha a linha
+```
+
+O `pytest.ini` já define `DJANGO_SETTINGS_MODULE=config.settings_test`
+(`config/settings_test.py`): SQLite em memória, `LocMemCache` (`CACHE_ENABLED=True`),
+`MESSAGERIA_ENABLED=False`, hashers MD5 e throttle elevado — a suíte evita
+dependências externas (PostgreSQL, Redis, broker). No container, a mesma suíte
+roda com `docker-compose exec api pytest --cov`.
+
+### O que a suíte prova
+
+| Camada | Cobertura |
+| :--- | :--- |
+| `events/contracts.py` · `events/topology.py` | Contratos: serialização, validação e topologia — 100%. |
+| `services/cache.py` · `services/cache_invalidation.py` | Cache-aside com `FakeRedis`, TTL, invalidação por eventos, métricas e falhas do Redis — 100%. |
+| `services/events.py` · `services/idempotencia.py` | Dispatcher in-process e deduplicação com falha de Redis caindo no PostgreSQL. |
+| `services/pagamento.py` · `services/notificacao.py` | Pedido ➔ Pagamento ➔ Notificação: idempotência, corridas e publicação — 100%. |
+| `services/health.py` · `services/publicacao.py` · `services/messaging.py` | Healthchecks (PostgreSQL/Redis/broker) e fachada de transporte (kafka/rabbitmq/rejeição). |
+| `api/*` | Serializers (validações), permissões, filtros, paginação, auth JWT e cache stats — 99–100%. |
+| `repositories/models.py` · seeds | Models e comandos `seed_demo_users` / `seed_demo_catalog` — 100%. |
+
+As barras e o estado realista aparecem com `--cov term-missing`; a meta de
+85% é imposta por `[report] fail_under` no `.coveragerc`.
+
+### Escopo da medição
+
+A cobertura mede o código de aplicação. Ficam de fora, de propósito
+(documentado em `.coveragerc`): migrações, `__init__`, `config/settings*.py`,
+pontas WSGI/ASGI e os **transportes de broker**
+(`services/messaging_kafka.py`, `services/messaging_rabbit.py`), que exigem um
+broker real no ar e por isso são exercitados pelo smoke test do Compose (Aula 10).
+
+---
+
+## 14. Variáveis de ambiente
 
 A configuração dos serviços é feita por variáveis de ambiente. O `docker-compose.yml`
 interpola essas variáveis (`${VAR}`) a partir do arquivo `.env` da raiz do projeto e injeta
@@ -981,7 +1028,7 @@ então o ambiente também sobe sem `.env` (com os valores de dev).
 
 ---
 
-## 14. Documentação & Especificações
+## 15. Documentação & Especificações
 
 | Arquivo | Descrição |
 | :--- | :--- |
@@ -1010,6 +1057,8 @@ então o ambiente também sobe sem `.env` (com os valores de dev).
 | [`specs/specs_da_aula_11.md`](specs/specs_da_aula_11.md) | Pedido → Pagamento → Notificação com eventos, cache do pedido e healthchecks. |
 | [`docs/DECISOES_TECNICAS_AULA11.md`](docs/DECISOES_TECNICAS_AULA11.md) | Decisões da Aula 11: contratos, topologia, cache, DLQ e fluxo completo. |
 | [`docs/METRICAS_AULA11.md`](docs/METRICAS_AULA11.md) | Evidências do fluxo completo, cache, idempotência e DLQ (Aula 11). |
+| [`specs/specs_da_aula_12.md`](specs/specs_da_aula_12.md) | Suíte de testes: unitários parametrizados, integração do ciclo de vida e meta de cobertura. |
+| [`pytest.ini`](pytest.ini) · [`.coveragerc`](.coveragerc) · [`config/settings_test.py`](config/settings_test.py) | Infraestrutura da suíte de testes (settings, fakes e escopo de cobertura). |
 | [`.env.example`](.env.example) | Modelo versionado das variáveis de ambiente. |
 | [`PROMPTS-TEMPLATE.md`](PROMPTS-TEMPLATE.md) | Template padrão de prompts de IA da squad. |
 | [`docs/CHECKLIST_IA_SAFE.md`](docs/CHECKLIST_IA_SAFE.md) | Checklist de revisão de código gerado por IA. |

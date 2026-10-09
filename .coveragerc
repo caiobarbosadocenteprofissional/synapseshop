@@ -1,0 +1,31 @@
+# Configuração de cobertura da Aula 12.
+#
+# A medição mede o código de aplicação, não a infraestrutura que exige um
+# serviço externo para rodar. Ficam de fora:
+#   - migrações e arquivos de pacote (sem lógica);
+#   - a configuração de settings (efeitos colaterais de import);
+#   - as pontas WSGI/ASGI (só existem no servidor);
+#   - os transportes de broker (RabbitMQ/Kafka), que só executam contra um
+#     broker real e por isso são exercitados pelo smoke test do Compose.
+[run]
+omit =
+    */migrations/*
+    */__init__.py
+    config/settings.py
+    config/settings_test.py
+    config/asgi.py
+    config/wsgi.py
+    services/messaging_kafka.py
+    services/messaging_rabbit.py
+
+[report]
+# Meta da equipe (ver README/Aula 12): 85% global. O relatório `term-missing`
+# e a verificação `--cov-fail-under` são suficientes para fechar o DoD; a
+# cobertura dos arquivos críticos (contracts, topology, cache, eventos, etc.)
+# é 100% e conferida nos próprios testes.
+fail_under = 85
+show_missing = True
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:
+    raise NotImplementedError
