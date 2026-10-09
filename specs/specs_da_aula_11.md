@@ -25,22 +25,22 @@ Após o estudo teórico e prático sobre cache e filas de mensagens nas aulas an
 
 ## 4. Requisitos de Entrega (Definition of Done)
 
-* [ ] O fluxo operacional básico (criar pedido ➔ simular pagamento ➔ notificar) foi implementado e testado com sucesso.
+* [x] O fluxo operacional básico (criar pedido ➔ simular pagamento ➔ notificar) foi implementado e testado com sucesso.
 
 
-* [ ] A API exposta contém os terminais (endpoints) necessários para gerir pedidos e pagamentos.
+* [x] A API exposta contém os terminais (endpoints) necessários para gerir pedidos e pagamentos.
 
 
-* [ ] A arquitetura integra um sistema de mensageria (Kafka ou RabbitMQ) e um sistema de cache (Redis).
+* [x] A arquitetura integra um sistema de mensageria (Kafka ou RabbitMQ) e um sistema de cache (Redis).
 
 
-* [ ] Todo o ecossistema do mini-backend é orquestrado de forma unificada através do Docker Compose.
+* [x] Todo o ecossistema do mini-backend é orquestrado de forma unificada através do Docker Compose.
 
 
-* [ ] A solução apresenta registos (*logs*) de funcionamento e possui uma rota de *healthcheck* implementada para monitorização.
+* [x] A solução apresenta registos (*logs*) de funcionamento e possui uma rota de *healthcheck* implementada para monitorização.
 
 
-* [ ] O ficheiro `README.md` foi devidamente atualizado com as instruções de inicialização e utilização do sistema construído.
+* [x] O ficheiro `README.md` foi devidamente atualizado com as instruções de inicialização e utilização do sistema construído.
 
 
-* [ ] A implementação respeitou estritamente a diretriz de não antecipação de requisitos (Anti-Hallucination Rule), evitando a inclusão precoce de infraestruturas ou testes reservados para o futuro do MVP.
+* [x] A implementação respeitou estritamente a diretriz de não antecipação de requisitos (Anti-Hallucination Rule), evitando a inclusão precoce de infraestruturas ou testes reservados para o futuro do MVP.

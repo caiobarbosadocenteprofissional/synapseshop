@@ -28,22 +28,22 @@ Seguindo estritamente a diretriz de desenvolvimento incremental (SpecDD) da Syna
 
 ## 4. Requisitos de Entrega (Definition of Done)
 
-* [ ] A estrutura da suíte de testes encontra-se perfeitamente organizada, contendo os diretórios `tests/unit`, `tests/integration` e o ficheiro `conftest.py`.
+* [x] A estrutura da suíte de testes encontra-se perfeitamente organizada, contendo os diretórios `tests/unit`, `tests/integration` e o ficheiro `conftest.py`.
 
 
-* [ ] As *fixtures* globais (escopos apropriados) e os *mocks* para serviços externos foram configurados com sucesso.
+* [x] As *fixtures* globais (escopos apropriados) e os *mocks* para serviços externos foram configurados com sucesso.
 
 
-* [ ] Foram desenvolvidos testes unitários parametrizados que cobrem satisfatoriamente os *utils* críticos e as lógicas de serviço.
+* [x] Foram desenvolvidos testes unitários parametrizados que cobrem satisfatoriamente os *utils* críticos e as lógicas de serviço.
 
 
-* [ ] Existe, pelo menos, um teste de integração funcional a validar endpoints da API e os reflexos na base de dados.
+* [x] Existe, pelo menos, um teste de integração funcional a validar endpoints da API e os reflexos na base de dados.
 
 
-* [ ] A meta mínima de cobertura estipulada pela equipa (por exemplo, 85% global e 100% nos utilitários críticos) foi atingida localmente.
+* [x] A meta mínima de cobertura estipulada pela equipa (por exemplo, 85% global e 100% nos utilitários críticos) foi atingida localmente.
 
 
-* [ ] O ficheiro `README.md` foi atualizado para incluir os comandos necessários à execução dos testes, as convenções adotadas pela equipa e as metas de cobertura.
+* [x] O ficheiro `README.md` foi atualizado para incluir os comandos necessários à execução dos testes, as convenções adotadas pela equipa e as metas de cobertura.
 
 
-* [ ] Todas as pendências técnicas ou melhorias identificadas foram registadas como *issues* no repositório do GitHub.
+* [x] Todas as pendências técnicas ou melhorias identificadas foram registadas como *issues* no repositório do GitHub.
