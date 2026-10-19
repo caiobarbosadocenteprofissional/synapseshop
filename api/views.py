@@ -1,9 +1,7 @@
-import json
 import logging
 from decimal import Decimal
 from uuid import uuid4
 
-from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.http import JsonResponse
 from rest_framework import permissions, viewsets
@@ -28,6 +26,7 @@ from repositories.models import Category, Item, Notificacao, Pedido, PedidoItem,
 from services import cache as cache_service
 from services import health as health_service
 from services import llm as llm_service
+from services.log_estruturado import log_evento
 from services import pagamento as pagamento_service
 from services.events import (
     CATEGORIA_ATUALIZADA,
@@ -194,12 +193,7 @@ class CacheStatsView(APIView):
 
 def _log_pedido(nome_evento: str, **campos) -> None:
     """Log estruturado do produtor, no mesmo formato dos logs da Aula 8."""
-    logger_pedidos.info(
-        json.dumps(
-            {"evento": nome_evento, **{k: v for k, v in campos.items() if v is not None}},
-            ensure_ascii=False,
-        )
-    )
+    log_evento(logger_pedidos, nome_evento, **campos)
 
 
 class PedidoCreateView(APIView):

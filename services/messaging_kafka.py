@@ -52,6 +52,7 @@ from confluent_kafka.admin import AdminClient, NewTopic
 from django.conf import settings
 
 from events.topology import TopologiaEvento, topologias
+from services.log_estruturado import log_evento
 
 logger = logging.getLogger("synapseshop.mensageria")
 
@@ -64,19 +65,8 @@ class MensageriaIndisponivel(RuntimeError):
     """O broker não pôde ser alcançado ou recusou a publicação."""
 
 
-def _bootstrap() -> List[str]:
-    return [s.strip() for s in settings.KAFKA_BOOTSTRAP_SERVERS.split(",") if s.strip()]
-
-
 def _log(nome_evento: str, **campos: Any) -> None:
-    # O primeiro parâmetro não se chama `evento` de propósito: os payloads
-    # carregam um campo `event_type` e a colisão seria um TypeError.
-    logger.info(
-        json.dumps(
-            {"evento": nome_evento, **{k: v for k, v in campos.items() if v is not None}},
-            ensure_ascii=False,
-        )
-    )
+    log_evento(logger, nome_evento, **campos)
 
 
 def _erro_do_broker(exc: Exception) -> str:

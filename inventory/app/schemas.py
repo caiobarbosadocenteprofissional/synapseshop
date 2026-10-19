@@ -18,12 +18,6 @@ class HealthResponse(BaseModel):
     status: str
 
 
-class MessageResponse(BaseModel):
-    """Resposta padrão para mensagens (ex.: recurso não encontrado)."""
-
-    detail: str
-
-
 class InventoryItem(BaseModel):
     """Item de inventário retornado pela API (response model tipado)."""
 

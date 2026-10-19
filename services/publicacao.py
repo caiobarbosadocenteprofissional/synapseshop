@@ -17,27 +17,20 @@ negócio (``pedido.criado``, ``pagamento.registrado``, ``notificacao.registrada`
 com o campo ``evento_publicado``.
 """
 
-import json
 import logging
 from typing import Any, Dict, Optional
 
 from django.conf import settings
 
 from events.topology import TopologiaEvento
+from services.log_estruturado import log_evento
 from services.messaging import MensageriaIndisponivel, ProdutorEvento
 
 logger = logging.getLogger("synapseshop.mensageria")
 
 
 def _log(nome_evento: str, **campos: Any) -> None:
-    # O primeiro parâmetro não se chama `evento` de propósito: os payloads
-    # carregam um campo `event_type` e a colisão seria um TypeError.
-    logger.info(
-        json.dumps(
-            {"evento": nome_evento, **{k: v for k, v in campos.items() if v is not None}},
-            ensure_ascii=False,
-        )
-    )
+    log_evento(logger, nome_evento, **campos)
 
 
 def publicar_evento(

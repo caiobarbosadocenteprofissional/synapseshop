@@ -65,7 +65,6 @@ USER = {"username": "user", "password": "user"}
 
 MARCA = str(int(time.time()))
 CHAVE_OK = f"pedido-smoke-{MARCA}"
-CHAVE_DUPLICADA = f"pedido-duplicada-{MARCA}"
 CHAVE_DLQ = f"pedido-dlq-{MARCA}"
 
 passed = 0

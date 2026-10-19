@@ -20,7 +20,6 @@ antes: reservar a chave antes corre o risco de descartar uma reentrega cujo
 processamento falhou, o que entregaria o pedido com efeito zero.
 """
 
-import json
 import logging
 from datetime import timedelta
 from typing import Optional
@@ -30,6 +29,7 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from repositories.models import EventoProcessado
+from services.log_estruturado import log_evento
 
 logger = logging.getLogger("synapseshop.idempotencia")
 
@@ -41,14 +41,7 @@ def _chave_cache(evento: str, idempotency_key: str) -> str:
 
 
 def _log(nome_evento: str, **campos) -> None:
-    # O primeiro parâmetro não se chama `evento` de propósito: os payloads
-    # carregam um campo `evento` e a colisão de nome seria um TypeError.
-    logger.info(
-        json.dumps(
-            {"evento": nome_evento, **{k: v for k, v in campos.items() if v is not None}},
-            ensure_ascii=False,
-        )
-    )
+    log_evento(logger, nome_evento, **campos)
 
 
 def limpar_expirados() -> int:

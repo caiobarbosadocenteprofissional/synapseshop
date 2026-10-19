@@ -23,7 +23,6 @@ Três decisões moram aqui:
    negativo que o smoke test exercita.
 """
 
-import json
 import logging
 import uuid
 from typing import Tuple
@@ -35,19 +34,13 @@ from events.contracts import EventoPagamentoProcessado
 from events.topology import chave_de, topologia_de
 from repositories.models import Pagamento, Pedido
 from services.events import PAGAMENTO_APROVADO, PAGAMENTO_RECUSADO, emitir_apos_commit
+from services.log_estruturado import log_evento
 
 logger = logging.getLogger("synapseshop.pagamento")
 
 
 def _log(nome_evento: str, **campos) -> None:
-    # O primeiro parâmetro não se chama `evento` de propósito: os payloads
-    # carregam um campo `event_type` e a colisão seria um TypeError.
-    logger.info(
-        json.dumps(
-            {"evento": nome_evento, **{k: v for k, v in campos.items() if v is not None}},
-            ensure_ascii=False,
-        )
-    )
+    log_evento(logger, nome_evento, **campos)
 
 
 def _referencia_simulada() -> str:

@@ -34,7 +34,6 @@ caminho feliz e o caminho de falha no mesmo ambiente. Os padrões aceitam
 ``fnmatch`` (``*``, ``?``), então a chave do teste pode ser única por execução.
 """
 
-import json
 import logging
 import os
 import sys
@@ -61,20 +60,14 @@ from events.topology import topologia_de  # noqa: E402
 from repositories.models import Pedido  # noqa: E402
 from services import idempotencia  # noqa: E402
 from services.events import PEDIDO_EM_PROCESSAMENTO, emitir_apos_commit  # noqa: E402
+from services.log_estruturado import log_evento  # noqa: E402
 from services.messaging import ConsumidorEvento  # noqa: E402
 
 logger = logging.getLogger("synapseshop.worker")
 
 
 def _log(nome_evento: str, **campos: Any) -> None:
-    # O primeiro parâmetro não se chama `evento` de propósito: o contrato do
-    # evento tem um campo `event_type` e a colisão de nome seria um TypeError.
-    logger.info(
-        json.dumps(
-            {"evento": nome_evento, **{k: v for k, v in campos.items() if v is not None}},
-            ensure_ascii=False,
-        )
-    )
+    log_evento(logger, nome_evento, **campos)
 
 
 class ErroForcadoDeTeste(RuntimeError):

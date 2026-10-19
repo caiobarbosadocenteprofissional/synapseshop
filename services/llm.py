@@ -40,6 +40,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from django.conf import settings
 
+from services.log_estruturado import log_evento
 from services.prompts import MODOS, montar_mensagens, normalizar_logs
 
 logger = logging.getLogger("synapseshop.ia")
@@ -413,14 +414,7 @@ def _chamar_com_resiliencia(
 # Operação principal
 # --------------------------------------------------------------------------- #
 def _log(nome_evento: str, **campos: Any) -> None:
-    # O primeiro parâmetro não se chama `evento` de propósito: os payloads podem
-    # carregar um campo homónimo e a colisão seria um TypeError.
-    logger.info(
-        json.dumps(
-            {"evento": nome_evento, **{k: v for k, v in campos.items() if v is not None}},
-            ensure_ascii=False,
-        )
-    )
+    log_evento(logger, nome_evento, **campos)
 
 
 def _custo_estimado_usd(tokens_prompt: int, tokens_output: int) -> float:

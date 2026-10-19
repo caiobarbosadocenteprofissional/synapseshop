@@ -43,7 +43,6 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from uuid import uuid4
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

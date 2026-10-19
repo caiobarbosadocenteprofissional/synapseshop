@@ -35,7 +35,6 @@ from sqlalchemy.orm import Session
 from app.db import SessionLocal
 from app.models import InventoryItem
 from app.repository import InventoryRepository
-from app.schemas import InventoryItemCreate, InventoryItemUpdate
 from app.services import InsufficientStockError, InventoryService
 
 TIMINGS: List[Tuple[str, int, float, str]] = []

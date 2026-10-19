@@ -37,6 +37,8 @@ from django.conf import settings
 from django.core.cache import cache
 from django_redis import get_redis_connection
 
+from services.log_estruturado import log_evento
+
 logger = logging.getLogger("synapseshop.cache")
 
 # Nomenclatura de chaves de cache (Aula 8).
@@ -131,18 +133,14 @@ def _texto(chave) -> str:
 
 
 def _log_lookup(endpoint: str, chave: str, resultado: str, ttl: int, origem: str) -> None:
-    logger.info(
-        json.dumps(
-            {
-                "evento": "cache.lookup",
-                "endpoint": endpoint,
-                "chave": chave,
-                "resultado": resultado,
-                "ttl": ttl,
-                "origem": origem,
-            },
-            ensure_ascii=False,
-        )
+    log_evento(
+        logger,
+        "cache.lookup",
+        endpoint=endpoint,
+        chave=chave,
+        resultado=resultado,
+        ttl=ttl,
+        origem=origem,
     )
 
 
@@ -167,8 +165,8 @@ def _cache_aside(chave: str, endpoint: str, ttl: int, produtor):
         # Ausência não é cacheada: guardar "não existe" transformaria um 404 em
         # HIT por 60 s, e um registro criado logo depois ficaria invisível.
         _contar(endpoint, RESULTADO_MISS)
-        _log_lookup(endpoint, chave, "AUSENTE", ttl, "postgresql")
-        return None, "AUSENTE"
+        _log_lookup(endpoint, chave, RESULTADO_AUSENTE, ttl, "postgresql")
+        return None, RESULTADO_AUSENTE
     try:
         cache.set(chave, dados, timeout=ttl)
     except Exception:  # noqa: BLE001 - falha de cache não derruba a requisição

@@ -3,7 +3,6 @@
 import pytest
 from decimal import Decimal
 
-from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers as drf
 
 from api import serializers

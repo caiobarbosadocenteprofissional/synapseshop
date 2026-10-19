@@ -36,7 +36,6 @@ torna o cenário reproduzível. É um gancho de teste, não de produção: exist
 que o caminho de falha seja observável sem alterar o código.
 """
 
-import json
 import logging
 import os
 import sys
@@ -59,6 +58,7 @@ from events.contracts import EVENTO_PAGAMENTO_PROCESSADO  # noqa: E402
 from events.topology import topologia_de  # noqa: E402
 from services import idempotencia  # noqa: E402
 from services import notificacao  # noqa: E402
+from services.log_estruturado import log_evento  # noqa: E402
 from services.messaging import ConsumidorEvento  # noqa: E402
 
 logger = logging.getLogger("synapseshop.worker")
@@ -69,14 +69,7 @@ class ErroForcadoDeTeste(RuntimeError):
 
 
 def _log(nome_evento: str, **campos: Any) -> None:
-    # O primeiro parâmetro não se chama `evento` de propósito: o contrato do
-    # evento tem um campo `event_type` e a colisão de nome seria um TypeError.
-    logger.info(
-        json.dumps(
-            {"evento": nome_evento, **{k: v for k, v in campos.items() if v is not None}},
-            ensure_ascii=False,
-        )
-    )
+    log_evento(logger, nome_evento, **campos)
 
 
 def _falha_forcada(candidatos) -> bool:

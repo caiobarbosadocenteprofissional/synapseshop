@@ -22,7 +22,6 @@ Duas decisões que valem registro:
    encontra o registro já existente e o efeito é o mesmo de sempre.
 """
 
-import json
 import logging
 import time
 from typing import Any, Dict, Tuple
@@ -34,20 +33,14 @@ from events.topology import chave_de, topologia_de
 from repositories.models import Notificacao, Pagamento, Pedido
 from services import idempotencia
 from services.events import NOTIFICACAO_REGISTRADA, emitir_apos_commit
+from services.log_estruturado import log_evento
 from services.publicacao import publicar_evento
 
 logger = logging.getLogger("synapseshop.notificacao")
 
 
 def _log(nome_evento: str, **campos: Any) -> None:
-    # O primeiro parâmetro não se chama `evento` de propósito: os payloads
-    # carregam um campo `event_type` e a colisão seria um TypeError.
-    logger.info(
-        json.dumps(
-            {"evento": nome_evento, **{k: v for k, v in campos.items() if v is not None}},
-            ensure_ascii=False,
-        )
-    )
+    log_evento(logger, nome_evento, **campos)
 
 
 class PagamentoInexistente(RuntimeError):

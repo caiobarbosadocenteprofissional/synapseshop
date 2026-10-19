@@ -45,6 +45,7 @@ import pika
 from django.conf import settings
 
 from events.topology import TopologiaEvento, topologias
+from services.log_estruturado import log_evento
 
 logger = logging.getLogger("synapseshop.mensageria")
 
@@ -81,14 +82,7 @@ def _conexao(client_id: str = "") -> pika.BlockingConnection:
 
 
 def _log(nome_evento: str, **campos: Any) -> None:
-    # O primeiro parâmetro não se chama `evento` de propósito: os payloads
-    # carregam um campo `event_type`/`evento` e a colisão seria um TypeError.
-    logger.info(
-        json.dumps(
-            {"evento": nome_evento, **{k: v for k, v in campos.items() if v is not None}},
-            ensure_ascii=False,
-        )
-    )
+    log_evento(logger, nome_evento, **campos)
 
 
 class ProdutorEvento:
