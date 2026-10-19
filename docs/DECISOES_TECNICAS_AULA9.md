@@ -1,7 +1,7 @@
 # Decisões Técnicas — Aula 9: Mensageria Assíncrona
 
 Registro das decisões de implementação da Aula 9, seguindo o formato das aulas
-anteriores. Evidências numéricas em [`METRICAS_AULA9.md`](METRICAS_AULA9.md).
+anteriores. Evidências numéricas em [`METRICAS_AULA9.md`](historico/METRICAS_AULA9.md).
 
 ---
 

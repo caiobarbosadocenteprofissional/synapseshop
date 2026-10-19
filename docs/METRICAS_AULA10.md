@@ -4,15 +4,10 @@ Todos os números vêm de `scripts/bench_mensageria.py`, que mede o caminho real
 da aplicação: `POST /api/v1/pedidos/` publica o evento, o `pedido-worker`
 consome e grava o estado. Nada é simulado.
 
-Cada execução grava um JSON em `docs/`, e estes são os quatro relatórios usados
-aqui:
-
-| Relatório | Modo | Pergunta que responde |
-| --- | --- | --- |
-| `resultados_bench_aula10_1consumidor.json` | `api` | Com a taxa de produção real, 1 consumidor acompanha? |
-| `resultados_bench_aula10_3consumidores.json` | `api` | O mesmo com 3 consumidores. |
-| `resultados_bench_aula10_drenagem_1consumidor.json` | `drenagem` | Qual o teto de consumo de 1 consumidor? |
-| `resultados_bench_aula10_drenagem_3consumidores.json` | `drenagem` | Qual o teto com 3? |
+Cada execução grava um JSON em `docs/` (não versionado; os comandos de
+reprodução estão no fim deste documento). Foram usados quatro relatórios: dois
+no modo `api` — taxa de produção real com 1 e 3 consumidores — e dois no modo
+`drenagem` — teto de consumo com 1 e 3 consumidores.
 
 ## Ambiente
 

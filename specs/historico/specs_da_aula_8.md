@@ -47,5 +47,5 @@ Exposição de Métricas: Recolher a métrica de eficácia do cache, ou hit rate
 | Escopo restrito | Sem Kafka/RabbitMQ, sem workers e sem IA; nenhuma referência a artefatos das aulas 9-11 |
 | Verificação | `scripts/smoke_test_cache.py` 29/29, `scripts/smoke_test_auth.py` 13/13, `manage.py check` sem issues, sem migrações pendentes |
 
-Detalhes em [`docs/DECISOES_TECNICAS_AULA8.md`](../docs/DECISOES_TECNICAS_AULA8.md)
-e [`docs/METRICAS_AULA8.md`](../docs/METRICAS_AULA8.md).
+Detalhes em [`docs/DECISOES_TECNICAS_AULA8.md`](../../docs/DECISOES_TECNICAS_AULA8.md)
+e [`docs/METRICAS_AULA8.md`](../../docs/METRICAS_AULA8.md).

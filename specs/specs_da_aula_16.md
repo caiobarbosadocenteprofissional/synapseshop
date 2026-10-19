@@ -1,1 +1,0 @@
-# A aula 16 não teve nenhuma spec apenas uma atividade por fora do projeto.

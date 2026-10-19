@@ -44,7 +44,7 @@ O contrato cobre todos os endpoints reais, com seus status codes, headers e sche
 
 ## Referências
 
-- [`specs/specs_da_aula_13.md`](../specs/specs_da_aula_13.md) — escopo da aula
-- [`specs/00_diretriz_incremental_specdd.md`](../specs/00_diretriz_incremental_specdd.md) — regra incremental
+- [`specs/historico/specs_da_aula_13.md`](../specs/historico/specs_da_aula_13.md) — escopo da aula
+- [`specs/historico/00_diretriz_incremental_specdd.md`](../specs/historico/00_diretriz_incremental_specdd.md) — regra incremental
 - [`CHANGELOG.md`](../CHANGELOG.md) — registro da entrega da Aula 13
-- Coleções Postman: [`docs/postman/SynapseShop_Aula13.postman_collection.json`](postman/SynapseShop_Aula13.postman_collection.json), [`docs/postman/SynapseShop_Aula7.postman_collection.json`](postman/SynapseShop_Aula7.postman_collection.json) e environment [`docs/postman/SynapseShop_Local.postman_environment.json`](postman/SynapseShop_Local.postman_environment.json)
+- Coleção Postman consolidada: [`docs/postman/SynapseShop.postman_collection.json`](postman/SynapseShop.postman_collection.json) e environment [`docs/postman/SynapseShop_Local.postman_environment.json`](postman/SynapseShop_Local.postman_environment.json)

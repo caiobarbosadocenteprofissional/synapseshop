@@ -1,7 +1,7 @@
 # Métricas — Aula 7 (Autenticação JWT, Throttling e Acesso)
 
 > Evidência funcional da camada de acesso seguro implementada na Aula 7.
-> Smoke test reproduzível em [`scripts/smoke_test_auth.py`](../scripts/smoke_test_auth.py).
+> Smoke test reproduzível em [`scripts/smoke_test_auth.py`](../../scripts/smoke_test_auth.py).
 
 ---
 
@@ -54,7 +54,7 @@
 
 ## 5. Cobertura dos cenários Postman
 
-A coleção [`SynapseShop_Aula7.postman_collection.json`](postman/SynapseShop_Aula7.postman_collection.json)
+A coleção [`SynapseShop_Aula7.postman_collection.json`](../postman/historico/SynapseShop_Aula7.postman_collection.json)
 cobre os cenários 1–13 com asserts de status e body, incluindo os casos de erro (401),
 acesso negado (403) e throttling (429) exigidos pelo DoD.
 

@@ -1,8 +1,8 @@
 # Métricas — Aula 9: Mensageria Assíncrona
 
 Evidências numéricas da Aula 9. Decisões em
-[`DECISOES_TECNICAS_AULA9.md`](DECISOES_TECNICAS_AULA9.md), contrato e operação
-em [`../README.md`](../README.md#13-mensageria-assíncrona-com-rabbitmq-aula-9).
+[`DECISOES_TECNICAS_AULA9.md`](../DECISOES_TECNICAS_AULA9.md), contrato e operação
+em [`docs/GUIA_MENSAGERIA.md`](../../docs/GUIA_MENSAGERIA.md).
 
 Todas as medições vêm de logs estruturados JSON emitidos pela própria
 aplicação (`duracao_ms` por evento), coletados nos contêineres do Compose. Não

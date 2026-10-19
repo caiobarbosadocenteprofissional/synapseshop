@@ -1,0 +1,1790 @@
+{
+  "info": {
+    "name": "SynapseShop — API v1 (completa)",
+    "description": "Coleção consolidada das Aulas 4, 7 e 13: CRUD do catálogo, autenticação JWT, cenários de acesso negado/throttling, fluxo de pedido, cache e documentação da API.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000"
+    },
+    {
+      "key": "category_id",
+      "value": "1"
+    },
+    {
+      "key": "item_id",
+      "value": "1"
+    },
+    {
+      "key": "admin_username",
+      "value": "admin"
+    },
+    {
+      "key": "admin_password",
+      "value": "admin"
+    },
+    {
+      "key": "user_username",
+      "value": "user"
+    },
+    {
+      "key": "user_password",
+      "value": "user"
+    },
+    {
+      "key": "admin_token",
+      "value": ""
+    },
+    {
+      "key": "admin_refresh",
+      "value": ""
+    },
+    {
+      "key": "user_token",
+      "value": ""
+    },
+    {
+      "key": "pedido_id",
+      "value": ""
+    },
+    {
+      "key": "idempotency_key",
+      "value": "pedido-aula13-001"
+    },
+    {
+      "key": "trace_id",
+      "value": "3f1a9c2e-6b4d-4c7a-9f10-2d8e5b7c0a11"
+    }
+  ],
+  "item": [
+    {
+      "name": "Documentação",
+      "item": [
+        {
+          "name": "GET /docs/ — Swagger UI",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Página do Swagger UI', () => pm.expect(pm.response.text()).to.include('swagger-ui'));",
+                  "pm.test('Aponta para /openapi.yaml', () => pm.expect(pm.response.text()).to.include('/openapi.yaml'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/docs/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "docs"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /docs/redoc/ — ReDoc",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Página do ReDoc', () => pm.expect(pm.response.text().toLowerCase()).to.include('redoc'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/docs/redoc/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "docs",
+                "redoc"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /openapi.yaml — contrato",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('É um documento OpenAPI 3.0.3', () => pm.expect(pm.response.text()).to.include('openapi: 3.0.3'));",
+                  "pm.test('Documenta o endpoint de pedidos', () => pm.expect(pm.response.text()).to.include('/api/v1/pedidos/'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/openapi.yaml",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "openapi.yaml"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "GET /health",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Status ok', () => pm.expect(pm.response.json().status).to.eql('ok'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /health (público)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Body status ok', () => pm.expect(pm.response.json().status).to.eql('ok'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /health — liveness",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Body status ok', () => pm.expect(pm.response.json().status).to.eql('ok'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /health/pronto — readiness",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK (dependências de pé)', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Campo pronto = true', () => pm.expect(body.pronto).to.be.true);",
+                  "pm.test('Detalha as dependências', () => pm.expect(body).to.have.property('dependencias'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health/pronto",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "health",
+                "pronto"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth (JWT)",
+      "item": [
+        {
+          "name": "POST /api/v1/auth/token/ — login admin (sucesso)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Access e refresh presentes', () => {",
+                  "  pm.expect(body).to.have.property('access');",
+                  "  pm.expect(body).to.have.property('refresh');",
+                  "});",
+                  "pm.test('Claim role = admin', () => pm.expect(body.role).to.eql('admin'));",
+                  "pm.collectionVariables.set('admin_token', body.access);",
+                  "pm.collectionVariables.set('admin_refresh', body.refresh);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": {
+              "Content-Type": "application/json"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"username\": \"{{admin_username}}\",\n    \"password\": \"{{admin_password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/token/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "token"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/auth/token/ — login user (sucesso)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Claim role = user', () => pm.expect(body.role).to.eql('user'));",
+                  "pm.collectionVariables.set('user_token', body.access);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": {
+              "Content-Type": "application/json"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"username\": \"{{user_username}}\",\n    \"password\": \"{{user_password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/token/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "token"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/auth/token/ — credencial inválida (erro 401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401 Unauthorized', () => pm.response.to.have.status(401));",
+                  "pm.test('Código de erro no body', () => pm.expect(pm.response.json()).to.have.property('detail'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": {
+              "Content-Type": "application/json"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"username\": \"{{admin_username}}\",\n    \"password\": \"senha-errada\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/token/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "token"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/auth/token/refresh/ — renovar token (sucesso)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Novo access e role admin', () => {",
+                  "  pm.expect(body).to.have.property('access');",
+                  "  pm.expect(body.role).to.eql('admin');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": {
+              "Content-Type": "application/json"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"refresh\": \"{{admin_refresh}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/token/refresh/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "token",
+                "refresh"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/auth/token/ — 6º login no minuto (429)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const url = pm.collectionVariables.get('base_url') + '/api/v1/auth/token/';",
+                  "const creds = JSON.stringify({",
+                  "  username: pm.collectionVariables.get('user_username'),",
+                  "  password: pm.collectionVariables.get('user_password')",
+                  "});",
+                  "const burn = (i, done) => {",
+                  "  if (i >= 5) return done();",
+                  "  pm.sendRequest({",
+                  "    url: url,",
+                  "    method: 'POST',",
+                  "    header: { 'Content-Type': 'application/json' },",
+                  "    body: { mode: 'raw', raw: creds }",
+                  "  }, () => burn(i + 1, done));",
+                  "};",
+                  "burn(0, () => {});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 429 Too Many Requests (throttled)', () => pm.response.to.have.status(429));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": {
+              "Content-Type": "application/json"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"username\": \"{{user_username}}\",\n    \"password\": \"{{user_password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/token/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "token"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/auth/token/ — login admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Claim role = admin', () => pm.expect(body.role).to.eql('admin'));",
+                  "pm.collectionVariables.set('admin_token', body.access);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": {
+              "Content-Type": "application/json"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"username\": \"{{admin_username}}\",\n    \"password\": \"{{admin_password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/token/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "token"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/auth/token/ — login user",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('user_token', pm.response.json().access);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": {
+              "Content-Type": "application/json"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"username\": \"{{user_username}}\",\n    \"password\": \"{{user_password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/token/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "token"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Acesso Negado",
+      "item": [
+        {
+          "name": "GET /api/v1/categories/ sem token (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401 Unauthorized', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/categories/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "categories"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/categories/ como user (403 — não-admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 403 Forbidden', () => pm.response.to.have.status(403));",
+                  "pm.test('Detail de permissão negada', () => pm.expect(pm.response.json()).to.have.property('detail'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer {{user_token}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"Somente admin poderia criar\",\n    \"description\": \"Acesso negado\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/categories/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "categories"
+              ]
+            }
+          }
+        },
+        {
+          "name": "DELETE /api/v1/categories/{{category_id}}/ como user (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 403 Forbidden', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": {
+              "Authorization": "Bearer {{user_token}}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/categories/{{category_id}}/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "categories",
+                "{{category_id}}"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Catálogo — CRUD (Aula 4)",
+      "item": [
+        {
+          "name": "Categories",
+          "item": [
+            {
+              "name": "GET /api/v1/categories/ (List)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200 OK', () => pm.response.to.have.status(200));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/v1/categories/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "categories",
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "POST /api/v1/categories/ (Create)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 201 Created', () => pm.response.to.have.status(201));",
+                      "const body = pm.response.json();",
+                      "if (body.id) { pm.collectionVariables.set('category_id', body.id); }"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Eletronicos\",\n  \"description\": \"Categoria de produtos eletronicos\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/v1/categories/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "categories",
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "GET /api/v1/categories/{id}/ (Retrieve)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200 OK', () => pm.response.to.have.status(200));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/v1/categories/{{category_id}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "categories",
+                    "{{category_id}}",
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "PUT /api/v1/categories/{id}/ (Update)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200 OK', () => pm.response.to.have.status(200));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Eletronicos e Games\",\n  \"description\": \"Categoria atualizada\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/v1/categories/{{category_id}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "categories",
+                    "{{category_id}}",
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "DELETE /api/v1/categories/{id}/ (Delete)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 204 No Content', () => pm.response.to.have.status(204));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/v1/categories/{{category_id}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "categories",
+                    "{{category_id}}",
+                    ""
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Items",
+          "item": [
+            {
+              "name": "GET /api/v1/items/ (List)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200 OK', () => pm.response.to.have.status(200));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/v1/items/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "items",
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "POST /api/v1/items/ (Create)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 201 Created', () => pm.response.to.have.status(201));",
+                      "const body = pm.response.json();",
+                      "if (body.id) { pm.collectionVariables.set('item_id', body.id); }"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Notebook Gamer\",\n  \"description\": \"Notebook 16GB RAM\",\n  \"price\": \"4999.90\",\n  \"category\": {{category_id}},\n  \"is_active\": true\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/v1/items/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "items",
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "GET /api/v1/items/{id}/ (Retrieve)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200 OK', () => pm.response.to.have.status(200));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/v1/items/{{item_id}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "items",
+                    "{{item_id}}",
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "PATCH /api/v1/items/{id}/ (Partial Update)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200 OK', () => pm.response.to.have.status(200));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"price\": \"4599.90\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/v1/items/{{item_id}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "items",
+                    "{{item_id}}",
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "POST /api/v1/items/ (Invalid payload -> 400)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 400 Bad Request', () => pm.response.to.have.status(400));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"\",\n  \"price\": \"-10.00\",\n  \"category\": 999999\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/v1/items/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "items",
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "GET /api/v1/items/999999/ (Not Found -> 404)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 404 Not Found', () => pm.response.to.have.status(404));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/v1/items/999999/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "items",
+                    "999999",
+                    ""
+                  ]
+                }
+              }
+            },
+            {
+              "name": "DELETE /api/v1/items/{id}/ (Delete)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 204 No Content', () => pm.response.to.have.status(204));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/api/v1/items/{{item_id}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "items",
+                    "{{item_id}}",
+                    ""
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Catálogo — Admin e Filtros (Aula 7)",
+      "item": [
+        {
+          "name": "Admin",
+          "item": [
+            {
+              "name": "POST /api/v1/categories/ como admin (201)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 201 Created', () => pm.response.to.have.status(201));",
+                      "const body = pm.response.json();",
+                      "pm.collectionVariables.set('category_id', String(body.id));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": {
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer {{admin_token}}"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n    \"name\": \"Eletronicos\",\n    \"description\": \"Produtos eletronicos\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/v1/categories/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "categories"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "POST /api/v1/items/ como admin (201)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 201 Created', () => pm.response.to.have.status(201));",
+                      "const body = pm.response.json();",
+                      "pm.collectionVariables.set('item_id', String(body.id));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": {
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer {{admin_token}}"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n    \"name\": \"Notebook 16GB\",\n    \"description\": \"Notebook de alto desempenho\",\n    \"price\": \"4999.90\",\n    \"category\": {{category_id}},\n    \"is_active\": true\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/v1/items/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "items"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "PATCH /api/v1/items/{{item_id}}/ como admin (200)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                      "pm.test('Nome atualizado', () => pm.expect(pm.response.json().name).to.eql('Notebook 32GB'));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "PATCH",
+                "header": {
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer {{admin_token}}"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n    \"name\": \"Notebook 32GB\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/v1/items/{{item_id}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "items",
+                    "{{item_id}}"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "DELETE /api/v1/categories/{{category_id}}/ como admin (204)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 204 No Content', () => pm.response.to.have.status(204));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "DELETE",
+                "header": {
+                  "Authorization": "Bearer {{admin_token}}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/v1/categories/{{category_id}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "categories",
+                    "{{category_id}}"
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Paginação e Filtros",
+          "item": [
+            {
+              "name": "GET /api/v1/categories/ paginado (envelope)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                      "const body = pm.response.json();",
+                      "pm.test('Envelope de paginação (count/results)', () => {",
+                      "  pm.expect(body).to.have.property('count');",
+                      "  pm.expect(body).to.have.property('next');",
+                      "  pm.expect(body).to.have.property('previous');",
+                      "  pm.expect(body).to.have.property('results');",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": {
+                  "Authorization": "Bearer {{admin_token}}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/v1/categories/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "categories"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "GET /api/v1/items/?page_size=5 (página menor)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                      "const body = pm.response.json();",
+                      "pm.test('Respeita page_size=5', () => pm.expect(body.results.length).to.be.at.most(5));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": {
+                  "Authorization": "Bearer {{admin_token}}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/v1/items/?page_size=5",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "query": [
+                    {
+                      "key": "page_size",
+                      "value": "5"
+                    }
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "items"
+                  ]
+                }
+              }
+            },
+            {
+              "name": "GET /api/v1/items/?search=&is_active=&category= (filtros)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                      "pm.test('Filtros aplicados', () => pm.expect(pm.response.json()).to.have.property('results'));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": {
+                  "Authorization": "Bearer {{user_token}}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/v1/items/?search=Notebook&is_active=true&category={{category_id}}&ordering=price",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "query": [
+                    {
+                      "key": "search",
+                      "value": "Notebook"
+                    },
+                    {
+                      "key": "is_active",
+                      "value": "true"
+                    },
+                    {
+                      "key": "category",
+                      "value": "{{category_id}}"
+                    },
+                    {
+                      "key": "ordering",
+                      "value": "price"
+                    }
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "items"
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Catálogo — Aula 13",
+      "item": [
+        {
+          "name": "POST /api/v1/categories/ — criar categoria (admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201 Created', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('category_id', String(pm.response.json().id));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer {{admin_token}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"Eletronicos\",\n    \"description\": \"Produtos eletronicos\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/categories/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "categories"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/items/ — criar item (admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201 Created', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('item_id', String(pm.response.json().id));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer {{admin_token}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"Notebook 16GB\",\n    \"description\": \"Notebook de alto desempenho\",\n    \"price\": \"4999.90\",\n    \"category\": {{category_id}},\n    \"is_active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/items/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "items"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /api/v1/items/ — listar com filtros",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope de paginação', () => pm.expect(pm.response.json()).to.have.property('results'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": {
+              "Authorization": "Bearer {{user_token}}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/items/?search=Notebook&is_active=true&category={{category_id}}&ordering=price",
+              "host": [
+                "{{base_url}}"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "Notebook"
+                },
+                {
+                  "key": "is_active",
+                  "value": "true"
+                },
+                {
+                  "key": "category",
+                  "value": "{{category_id}}"
+                },
+                {
+                  "key": "ordering",
+                  "value": "price"
+                }
+              ],
+              "path": [
+                "api",
+                "v1",
+                "items"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Fluxo de Pedido",
+      "item": [
+        {
+          "name": "POST /api/v1/pedidos/ — criar (Idempotency-Key + X-Trace-Id)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201 Created (evento publicado)', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.test('Evento publicado', () => pm.expect(body.evento_publicado).to.be.true);",
+                  "pm.test('X-Trace-Id ecoado na resposta', () => pm.expect(pm.response.headers.get('X-Trace-Id')).to.eql(pm.collectionVariables.get('trace_id')));",
+                  "pm.test('Correlation id igual ao X-Trace-Id', () => pm.expect(body.correlation_id).to.eql(pm.collectionVariables.get('trace_id')));",
+                  "pm.collectionVariables.set('pedido_id', String(body.id));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer {{user_token}}",
+              "Idempotency-Key": "{{idempotency_key}}",
+              "X-Trace-Id": "{{trace_id}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"itens\": [\n        { \"item_id\": {{item_id}}, \"quantidade\": 2 }\n    ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/pedidos/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pedidos"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/pedidos/ — repetir (idempotente, 200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK (pedido existente)', () => pm.response.to.have.status(200));",
+                  "pm.test('Mesmo pedido', () => pm.expect(String(pm.response.json().id)).to.eql(pm.collectionVariables.get('pedido_id')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer {{user_token}}",
+              "Idempotency-Key": "{{idempotency_key}}",
+              "X-Trace-Id": "{{trace_id}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"itens\": [\n        { \"item_id\": {{item_id}}, \"quantidade\": 2 }\n    ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/pedidos/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pedidos"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /api/v1/pedidos/{{pedido_id}}/ — consultar (cache)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('X-Cache presente', () => pm.expect(['HIT', 'MISS', 'BYPASS']).to.include(pm.response.headers.get('X-Cache')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": {
+              "Authorization": "Bearer {{user_token}}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/pedidos/{{pedido_id}}/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pedidos",
+                "{{pedido_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/pedidos/{{pedido_id}}/pagamento/ — pagar",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201 Created', () => pm.response.to.have.status(201));",
+                  "pm.test('Evento publicado', () => pm.expect(pm.response.json().evento_publicado).to.be.true);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer {{user_token}}",
+              "X-Trace-Id": "{{trace_id}}"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"resultado\": \"APROVADO\",\n    \"forma_pagamento\": \"pix\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/pedidos/{{pedido_id}}/pagamento/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pedidos",
+                "{{pedido_id}}",
+                "pagamento"
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /api/v1/notificacoes/ — ver a notificação gerada",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope de paginação', () => pm.expect(pm.response.json()).to.have.property('results'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": {
+              "Authorization": "Bearer {{user_token}}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/notificacoes/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notificacoes"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cache",
+      "item": [
+        {
+          "name": "GET /api/v1/cache/stats/ — métricas (admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Traz hit rate global', () => pm.expect(pm.response.json()).to.have.property('hit_rate'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": {
+              "Authorization": "Bearer {{admin_token}}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/cache/stats/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cache",
+                "stats"
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /api/v1/cache/stats/ — zerar contadores (admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": {
+              "Authorization": "Bearer {{admin_token}}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/cache/stats/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cache",
+                "stats"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -40,7 +40,7 @@ Todas as alterações relevantes deste projeto são documentadas neste arquivo.
 - **Interfaces de documentação**: `api/docs.py` com Swagger UI (`/docs/`) e ReDoc (`/docs/redoc/`) servidos via CDN (unpkg), além de `/openapi.yaml`. Rotas registradas em `config/urls.py`.
 - **Suporte a headers no fluxo de pedidos**: `PedidoCreateView` aceita `Idempotency-Key` (além do campo `idempotency_key` no corpo), usa `X-Trace-Id` como `correlation_id` quando informado e o ecoa na resposta 201.
 - **Documentação markdown**: `docs/CONVENCOES_API.md`, `docs/CHECKLIST_INTEGRADOR_EXTERNO.md`, `docs/OPENAPI.md`.
-- **Coleções Postman**: `docs/postman/SynapseShop_Aula13.postman_collection.json` e environment `docs/postman/SynapseShop_Local.postman_environment.json` (mantida também `SynapseShop_Aula7.postman_collection.json`).
+- **Coleções Postman**: coleção consolidada `docs/postman/SynapseShop.postman_collection.json` e environment `docs/postman/SynapseShop_Local.postman_environment.json`.
 - **Testes de documentação**: `tests/integration/test_api_docs.py` cobre Swagger UI, ReDoc, servico do `openapi.yaml`, caso ausente e os headers de contrato.
 
 ### Alterado

@@ -105,7 +105,7 @@
   contêiner) cobre: seed de inserções, consultas, update, rollback por `sku`
   duplicado, rollback por `quantity < 0` (CHECK no banco), ajuste de estoque e
   limpeza — com **coleta de tempos de execução**.
-- **Resultado:** ver `docs/METRICAS_AULA6.md`.
+- **Resultado:** ver `docs/historico/METRICAS_AULA6.md`.
 
 ## 10. Anti-antecipação (SpecDD)
 

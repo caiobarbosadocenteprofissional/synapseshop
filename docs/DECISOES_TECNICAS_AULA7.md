@@ -1,7 +1,7 @@
 # Decisões Técnicas — Aula 7 (Autenticação JWT, Papéis e Throttling)
 
 > Registro formal das decisões técnicas tomadas pela equipe SynapseShop na Aula 7,
-> guiadas pelo DoD de `specs/specs_da_aula_7.md` e pela diretriz SpecDD.
+> guiadas pelo DoD de `specs/historico/specs_da_aula_7.md` e pela diretriz SpecDD.
 
 ---
 
@@ -21,7 +21,7 @@
 ## 2. Item 1 da seção 3 da spec ("índices compostos, rollback seguro, repositório transacional")
 
 - **Decisão:** classificado como **artefato da Aula 6** (trecho copiado da spec da Aula 6 —
-  já entregue em `DECISOES_TECNICAS_AULA6.md` e `METRICAS_AULA6.md`). A execução da Aula 7
+  já entregue em `docs/historico/DECISOES_TECNICAS_AULA6.md` e `docs/historico/METRICAS_AULA6.md`). A execução da Aula 7
   foi guiada exclusivamente pelo seu DoD.
 
 ## 3. Biblioteca e versões
@@ -89,7 +89,7 @@
 
 ## 10. Coleção Postman
 
-- **Decisão:** nova coleção `docs/postman/SynapseShop_Aula7.postman_collection.json`
+- **Decisão:** nova coleção `docs/postman/SynapseShop_Aula7.postman_collection.json` (hoje consolidada em `docs/postman/SynapseShop.postman_collection.json`)
   com cenários ordenados: Health; Auth (login admin/user ok, erro 401, refresh);
   Acesso Negado (401 sem token, 403 user); Admin (CRUD admin 201/200/204); Paginação e
   Filtros; Throttling (429 após exaurir `login`). Tokens são salvos em variáveis da
