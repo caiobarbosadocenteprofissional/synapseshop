@@ -87,5 +87,3 @@ Na sequÃªncia do desenvolvimento de testes automatizados, a Aula 13 foca-se na
 
 
 * [x] O projeto continua a ser executado perfeitamente via `docker-compose up`, sem introduzir dependÃªncias ou cÃ³digo de etapas futuras fora do escopo da Aula 13.
-
-

@@ -1,8 +1,10 @@
 from decimal import Decimal
 
+from django.conf import settings
 from rest_framework import serializers
 
 from repositories.models import Category, Item, Notificacao, Pagamento, Pedido, PedidoItem
+from services.prompts import MODOS
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -134,6 +136,49 @@ class PagamentoSerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = fields
+
+
+class AssistRequestSerializer(serializers.Serializer):
+    """Entrada de ``POST /api/v1/assist`` (Aula 14).
+
+    Valida o corpo mínimo da especificação:
+    ``{ "mode": "summarize|explain", "logs": "string|array",
+        "temperature": 0.0-1.0, "max_tokens": 256 }``.
+
+    ``logs`` aceita uma string ou um array de strings — as duas formas são
+    legítimas na origem (terminal vs. coletor de logs). ``temperature`` e
+    ``max_tokens`` têm defaults seguros e ``max_tokens`` é limitado por
+    ``LLM_MAX_TOKENS_LIMITE``: o servidor mantém o teto de custo, mesmo que o
+    cliente peça mais.
+    """
+
+    mode = serializers.ChoiceField(choices=MODOS)
+    logs = serializers.JSONField()
+    temperature = serializers.FloatField(
+        min_value=0.0, max_value=1.0, default=0.2, required=False
+    )
+    max_tokens = serializers.IntegerField(min_value=1, default=256, required=False)
+
+    def validate_logs(self, value):
+        if isinstance(value, str):
+            if not value.strip():
+                raise serializers.ValidationError("logs não pode ser vazio.")
+            return value
+        if isinstance(value, list):
+            if not value:
+                raise serializers.ValidationError("logs não pode ser uma lista vazia.")
+            if not all(isinstance(linha, str) for linha in value):
+                raise serializers.ValidationError("logs deve conter apenas strings.")
+            return value
+        raise serializers.ValidationError(
+            "logs deve ser uma string ou uma lista de strings."
+        )
+
+    def validate_max_tokens(self, value):
+        limite = getattr(settings, "LLM_MAX_TOKENS_LIMITE", 1024)
+        if value > limite:
+            raise serializers.ValidationError(f"max_tokens não pode exceder {limite}.")
+        return value
 
 
 class NotificacaoSerializer(serializers.ModelSerializer):

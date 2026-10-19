@@ -6,6 +6,8 @@ from api.auth import (
     TokenRefreshViewWithThrottle,
 )
 from api.views import (
+    AssistStatsView,
+    AssistView,
     CacheStatsView,
     CategoryViewSet,
     ItemViewSet,
@@ -44,6 +46,10 @@ urlpatterns = [
         name="pedido_pagamento",
     ),
     path("notificacoes/", NotificacaoListView.as_view(), name="notificacao_list"),
+    # Aula 14: assistente de IA (sumarização/explicação de logs) e as métricas
+    # da camada de IA (latência, erros, tokens, custo e estado do circuito).
+    path("assist/", AssistView.as_view(), name="assist"),
+    path("assist/stats/", AssistStatsView.as_view(), name="assist_stats"),
 ]
 
 urlpatterns += router.urls

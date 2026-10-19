@@ -61,6 +61,10 @@ tags:
     description: Notificações gravadas pelo consumidor de eventos.
   - name: Cache
     description: Métricas de eficácia do cache-aside (restrito ao papel admin).
+  - name: Assistente IA
+    description: >-
+      Sumarização e explicação de logs via LLM, com redação de PII/segredos
+      antes do envio e telemetria de latência, erros, tokens e custo.
 
 paths:
   /health:
@@ -604,6 +608,91 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  /api/v1/assist/:
+    post:
+      tags: [Assistente IA]
+      summary: Sumariza ou explica logs via LLM
+      description: |
+        Envia logs (string única ou array de linhas) ao provedor de LLM e devolve
+        a resposta com os metadados de consumo. Dados sensíveis (e-mail, CPF/CNPJ,
+        cartão, telefone e segredos) são redigidos **antes** de sair para o
+        provedor. A chamada é protegida por timeout curto, retry com backoff
+        exponencial + jitter e circuit breaker (`closed`/`open`/`half-open`).
+      operationId: createAssist
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssistRequest'
+            examples:
+              summarize:
+                summary: Sumarizar um conjunto de logs
+                value:
+                  mode: summarize
+                  logs:
+                    - "2026-10-14 10:20:31 ERROR checkout falhou para joao@example.com"
+                    - "2026-10-14 10:20:32 INFO retry agendado"
+              explain:
+                summary: Explicar um log com parâmetros explícitos
+                value:
+                  mode: explain
+                  logs: "42 requisições recusadas com HTTP 429 em 5 minutos"
+                  temperature: 0.2
+                  max_tokens: 256
+      responses:
+        '200':
+          description: Resposta gerada pelo assistente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '503':
+          $ref: '#/components/responses/AssistIndisponivel'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+
+  /api/v1/assist/stats/:
+    get:
+      tags: [Assistente IA]
+      summary: Consulta as métricas da camada de IA (admin)
+      operationId: getAssistStats
+      responses:
+        '200':
+          description: Latência, taxa de erro, tokens, custo estimado e estado do circuito.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistStats'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Assistente IA]
+      summary: Zera os contadores da camada de IA (admin)
+      description: Zera a telemetria e fecha o circuito, abrindo uma nova janela de medição.
+      operationId: resetAssistStats
+      responses:
+        '200':
+          description: Contadores zerados; devolve o estado inicial.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistStats'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -782,6 +871,39 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/HealthPronto'
+    BadGateway:
+      description: O provedor de LLM respondeu com erro (HTTP 5xx ou falha de rede).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            detail: Provedor indisponível (HTTP 500 do provedor de LLM).
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    GatewayTimeout:
+      description: O provedor de LLM não respondeu dentro do timeout configurado.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            detail: Timeout na conexão com o provedor.
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    AssistIndisponivel:
+      description: Assistente desabilitado (sem `LLM_API_KEY`) ou circuito aberto.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            detail: LLM_API_KEY não configurada; o assistente está desabilitado.
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
 
   schemas:
     Problem:
@@ -1250,3 +1372,98 @@ components:
         hit_rate:
           type: number
           format: float
+
+    AssistRequest:
+      type: object
+      required: [mode, logs]
+      properties:
+        mode:
+          type: string
+          enum: [summarize, explain]
+          description: >-
+            `summarize` reduz os logs ao essencial; `explain` interpreta o que
+            ocorreu, a causa provável e o próximo passo.
+        logs:
+          description: Logs a analisar. Aceita uma string única ou um array de linhas.
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: string
+        temperature:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+          default: 0.2
+        max_tokens:
+          type: integer
+          minimum: 1
+          maximum: 1024
+          default: 256
+          description: Limitado no servidor por `LLM_MAX_TOKENS_LIMITE`.
+    AssistMeta:
+      type: object
+      properties:
+        tokens_prompt:
+          type: integer
+        tokens_output:
+          type: integer
+        tentativas:
+          type: integer
+          description: Número de tentativas usadas (1 = sem retry).
+        latencia_ms:
+          type: number
+          format: float
+        custo_estimado_usd:
+          type: number
+          format: float
+        redacoes:
+          type: integer
+          description: Quantidade de dados sensíveis redigidos antes do envio.
+        modelo:
+          type: string
+    AssistResponse:
+      type: object
+      required: [answer, meta]
+      properties:
+        answer:
+          type: string
+        meta:
+          $ref: '#/components/schemas/AssistMeta'
+    AssistStats:
+      type: object
+      properties:
+        chamadas:
+          type: integer
+        sucessos:
+          type: integer
+        erros:
+          type: integer
+        taxa_erro:
+          type: number
+          format: float
+        tokens_prompt:
+          type: integer
+        tokens_output:
+          type: integer
+        tokens_total:
+          type: integer
+        latencia_media_ms:
+          type: number
+          format: float
+        custo_total_usd:
+          type: number
+          format: float
+        erros_por_tipo:
+          type: object
+          additionalProperties:
+            type: integer
+        circuito:
+          type: object
+          properties:
+            estado:
+              type: string
+              enum: [closed, open, half-open]
+            falhas_consecutivas:
+              type: integer

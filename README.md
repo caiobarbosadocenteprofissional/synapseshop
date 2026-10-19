@@ -1009,6 +1009,18 @@ entÃ£o o ambiente tambÃ©m sobe sem `.env` (com os valores de dev).
 | `RABBITMQ_ROUTING_KEY_NOTIFICACAO_ENVIADA` | `notificacao.enviada` | `api`, `notificacao-worker` (Aula 11) |
 | `PEDIDO_WORKER_FALHA_IDEM_KEYS` | (vazio) | `pedido-worker` (padrÃµes `fnmatch` de `idempotency_key` para simular erro) |
 | `NOTIFICACAO_WORKER_FALHA_IDEM_KEYS` | (vazio) | `notificacao-worker` (padrÃµes `fnmatch` para simular erro â€” aceita `pedido:<id>` ou `pagamento:<id>`) |
+| `LLM_BASE_URL` | `https://api.openai.com/v1` | `api` (`config/settings.py` â€” base do provedor compatÃ­vel com Chat Completions) |
+| `LLM_API_KEY` | (vazio) | `api` (`config/settings.py` â€” sem chave, o assistente responde 503) |
+| `LLM_MODEL` | `gpt-4o-mini` | `api` (`config/settings.py` â€” modelo usado nas chamadas) |
+| `LLM_TIMEOUT_S` | `5` | `api` (`config/settings.py` â€” timeout por tentativa) |
+| `LLM_MAX_TENTATIVAS` | `3` | `api` (`config/settings.py` â€” tentativas totais, incluindo a inicial) |
+| `LLM_BACKOFF_BASE_MS` | `250` | `api` (base do backoff exponencial com jitter) |
+| `LLM_BACKOFF_MAX_MS` | `5000` | `api` (teto do backoff) |
+| `LLM_CIRCUITO_LIMITE_FALHAS` | `3` | `api` (falhas consecutivas que abrem o circuito) |
+| `LLM_CIRCUITO_RESET_SEGUNDOS` | `30` | `api` (repouso antes da tentativa de half-open) |
+| `LLM_MAX_TOKENS_LIMITE` | `1024` | `api` (teto de `max_tokens` aceito no payload) |
+| `LLM_PRECO_PROMPT_USD_MILHAO` | `0` | `api` (preÃ§o por 1M tokens de prompt; `0` = sem preÃ§o conhecido) |
+| `LLM_PRECO_OUTPUT_USD_MILHAO` | `0` | `api` (preÃ§o por 1M tokens de saÃ­da; `0` = sem preÃ§o conhecido) |
 | `LOG_LEVEL_SYNAPSESHOP` | `INFO` | `api`, `pedido-worker` (nÃ­vel dos logs estruturados) |
 | `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD` / `SEED_ADMIN_EMAIL` | `admin` / `admin` / `admin@synapseshop.local` | `api` (`seed_demo_users`) |
 | `SEED_USER_USERNAME` / `SEED_USER_PASSWORD` / `SEED_USER_EMAIL` | `user` / `user` / `user@synapseshop.local` | `api` (`seed_demo_users`) |
@@ -1059,6 +1071,10 @@ entÃ£o o ambiente tambÃ©m sobe sem `.env` (com os valores de dev).
 | [`docs/METRICAS_AULA11.md`](docs/METRICAS_AULA11.md) | EvidÃªncias do fluxo completo, cache, idempotÃªncia e DLQ (Aula 11). |
 | [`specs/specs_da_aula_12.md`](specs/specs_da_aula_12.md) | SuÃ­te de testes: unitÃ¡rios parametrizados, integraÃ§Ã£o do ciclo de vida e meta de cobertura. |
 | [`pytest.ini`](pytest.ini) Â· [`.coveragerc`](.coveragerc) Â· [`config/settings_test.py`](config/settings_test.py) | Infraestrutura da suÃ­te de testes (settings, fakes e escopo de cobertura). |
+| [`specs/specs_da_aula_14.md`](specs/specs_da_aula_14.md) | Assistente de IA: `llm_service` resiliente e endpoint `/api/v1/assist`. |
+| [`docs/DECISOES_TECNICAS_AULA14.md`](docs/DECISOES_TECNICAS_AULA14.md) | DecisÃµes da Aula 14: resiliÃªncia, circuito, redaÃ§Ã£o de PII e telemetria. |
+| [`docs/METRICAS_AULA14.md`](docs/METRICAS_AULA14.md) | Telemetria do assistente, custo estimado e evidÃªncia de teste (Aula 14). |
+| [`docs/BACKLOG_AULA14.md`](docs/BACKLOG_AULA14.md) | PendÃªncias e melhorias futuras da camada de IA (prontas para virar *issues*). |
 | [`.env.example`](.env.example) | Modelo versionado das variÃ¡veis de ambiente. |
 | [`PROMPTS-TEMPLATE.md`](PROMPTS-TEMPLATE.md) | Template padrÃ£o de prompts de IA da squad. |
 | [`docs/CHECKLIST_IA_SAFE.md`](docs/CHECKLIST_IA_SAFE.md) | Checklist de revisÃ£o de cÃ³digo gerado por IA. |
@@ -1077,3 +1093,165 @@ entÃ£o o ambiente tambÃ©m sobe sem `.env` (com os valores de dev).
 **Headers de contrato**: Authorization: Bearer <token>, Idempotency-Key (alternativa a idempotency_key no corpo), X-Trace-Id (propagado como correlation_id e ecoado).
 
 **Erros**: padrão RFC 7807 (pplication/problem+json) com esquema Problem. Paginação page/page_size, filtros search/is_active/category, ordenação ordering.
+
+---
+
+## 16. Assistente de IA — `llm_service` (Aula 14)
+
+Camada fundacional de IA do SynapseShop. O endpoint `POST /api/v1/assist`
+**sumariza** ou **explica** logs via um provedor de LLM, controlando
+`temperature` e `max_tokens`. O foco da aula não é "chamar a API": é **sobreviver
+a ela falhar** (timeout, limite de taxa, indisponibilidade), **proteger dados
+sensíveis** antes do envio e **medir o consumo**.
+
+### Endpoints
+
+| Método | Rota | Acesso | Descrição |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/v1/assist/` | autenticado | Sumariza/explica logs e devolve a resposta + metadados de consumo. |
+| `GET` | `/api/v1/assist/stats/` | admin | Telemetria: latência, erros, tokens, custo e estado do circuito. |
+| `POST` | `/api/v1/assist/stats/` | admin | Zera a telemetria e fecha o circuito (nova janela de medição). |
+
+**Corpo (`POST /api/v1/assist/`):**
+
+```json
+{
+  "mode": "summarize",
+  "logs": ["2026-10-14 10:20:31 ERROR checkout falhou para joao@example.com", "2026-10-14 10:20:32 INFO retry agendado"],
+  "temperature": 0.2,
+  "max_tokens": 256
+}
+```
+
+- `mode`: `summarize` ou `explain` (obrigatório).
+- `logs`: uma **string** única ou um **array** de linhas (obrigatório).
+- `temperature`: `0.0`–`1.0` (default `0.2`).
+- `max_tokens`: inteiro ≥ 1 (default `256`), limitado pelo servidor a
+  `LLM_MAX_TOKENS_LIMITE` (`1024`); acima disso a resposta é `400`.
+
+**Resposta `200`:**
+
+```json
+{
+  "answer": "Resumo: falha de checkout para cliente; retry agendado.",
+  "meta": {
+    "tokens_prompt": 120,
+    "tokens_output": 80,
+    "tentativas": 1,
+    "latencia_ms": 412.7,
+    "custo_estimado_usd": 6.6e-05,
+    "redacoes": 2,
+    "modelo": "gpt-4o-mini"
+  }
+}
+```
+
+**Erros:** `400` payload inválido, `401` não autenticado, `429` limite de taxa do
+provedor, `502` provedor indisponível (5xx/rede), `503` assistente desabilitado
+(sem `LLM_API_KEY`) ou circuito aberto, `504` timeout do provedor.
+
+### Arquitetura
+
+Três camadas, cada uma com uma responsabilidade:
+
+| Arquivo | Papel |
+| :--- | :--- |
+| `services/prompts.py` | Templates de prompt por modo, normalização da entrada (`str`/lista) e montagem das mensagens. É o artefato revisável pela equipe. |
+| `services/llm.py` | O `llm_service`: redação, transporte HTTP (stdlib), timeout, retry, circuito, telemetria e a operação `assistir()`. |
+| `api/serializers.py` · `api/views.py` · `api/urls.py` | Contrato e roteamento. A view é fina: valida, delega e traduz o `status_http` do erro de domínio. |
+
+Fluxo de uma chamada, e a **ordem importa**:
+
+```
+validar (serializer)
+  → normalizar logs (str | lista)
+  → redigir PII/segredos            ← acontece ANTES de sair de casa
+  → montar prompt (system + user)
+  → chamar com resiliência (circuito → retry → timeout)
+  → registrar telemetria e log estruturado (só a CONTAGEM de redações)
+  → responder { answer, meta }
+```
+
+### Resiliência
+
+1. **Timeout** — `LLM_TIMEOUT_S` (default `5s`) por tentativa. Uma lentidão do
+   provedor vira erro tratável, não requisição pendurada.
+2. **Retry com backoff exponencial + jitter** — até `LLM_MAX_TENTATIVAS` (3),
+   espera `min(base·2^(n-1), teto)` com *equal jitter*. Só erros reentregáveis
+   (`timeout`, `429`, `5xx`/rede); um `4xx` de payload não é repetido.
+3. **Circuit breaker** — após `LLM_CIRCUITO_LIMITE_FALHAS` (3) falhas
+   consecutivas o circuito **abre** e falha rápido (503) sem tocar o provedor;
+   após `LLM_CIRCUITO_RESET_SEGUNDOS` (30s) entra em **half-open**, libera uma
+   tentativa de prova e **fecha** no sucesso ou **reabre** na falha.
+
+| Estado | Comportamento |
+| :--- | :--- |
+| `closed` | Passa para o provedor normalmente. |
+| `open` | Falha rápido (`LLMCircuitoAberto`, 503); sem chamada externa. |
+| `half-open` | Libera uma tentativa de prova após o repouso. |
+
+### Templates de prompt
+
+`services/prompts.py` define um contrato comum (português do Brasil, responde só
+com base nos logs, não especula, não revela dados pessoais) e dois modos:
+
+- **`summarize`** — "o que aconteceu?": reduz os logs a até 5 tópicos objetivos;
+- **`explain`** — "por que aconteceu?": descreve o ocorrido, a causa provável e o
+  próximo passo.
+
+### Privacidade: redação de dados sensíveis
+
+Antes de qualquer envio ao provedor **e** antes de logar, `redigir()` substitui
+por marcadores: e-mail, CPF, CNPJ, cartão, telefone, segredos
+(`api_key`/`senha`/`authorization`/…) e `Bearer`. Ao log, vai apenas a
+**contagem** de redações (`redacoes`) — o log de auditoria nunca vira uma cópia
+do dado sensível. A resposta do endpoint também não reconstrói o dado: o
+provedor só recebe o texto já redigido.
+
+### Métricas recolhidas
+
+`GET /api/v1/assist/stats/` expõe, por processo: `chamadas`, `sucessos`, `erros`,
+`taxa_erro`, `tokens_prompt`/`tokens_output`/`tokens_total`, `latencia_media_ms`,
+`custo_total_usd`, `erros_por_tipo` e o `circuito` (estado + falhas
+consecutivas). O custo é **estimado** por tokens e preços configuráveis
+(`LLM_PRECO_PROMPT_USD_MILHAO`/`LLM_PRECO_OUTPUT_USD_MILHAO`; `0` = sem preço
+conhecido, mas os tokens seguem contados). Detalhes em
+[`docs/METRICAS_AULA14.md`](docs/METRICAS_AULA14.md) e as decisões em
+[`docs/DECISOES_TECNICAS_AULA14.md`](docs/DECISOES_TECNICAS_AULA14.md).
+
+### Exemplos rápidos
+
+```bash
+# Assistente autenticado (use o token de admin ou user)
+curl -s -X POST http://localhost:8000/api/v1/assist/ \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"mode":"explain","logs":["2026-10-14 10:20:31 ERROR checkout falhou"],"max_tokens":256}'
+
+# Telemetria da camada de IA (admin)
+curl -s http://localhost:8000/api/v1/assist/stats/ -H "Authorization: Bearer $ADMIN_TOKEN"
+
+# Zera a telemetria e fecha o circuito (admin)
+curl -s -X POST http://localhost:8000/api/v1/assist/stats/ -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+### Operação
+
+- Sem `LLM_API_KEY`, o endpoint responde `503` e **nada** é enviado ao provedor —
+  a IA é opcional e a imagem sobe normalmente sem a chave (kill-switch).
+- `LLM_BASE_URL` aponta para qualquer provedor compatível com Chat Completions
+  (OpenAI, DeepSeek, …); `LLM_MODEL` escolhe o modelo.
+- A telemetria é **por processo**: com vários workers, cada um reporta o seu
+  recorte.
+
+### Verificação
+
+A suíte cobre as margens de erro da spec (timeout, HTTP 429, HTTP 5xx,
+payload inválido), o retry/circuito, a redação antes do envio e o contrato HTTP —
+sempre com o provedor substituído por *mock*, sem tocar a Internet:
+
+```bash
+python -m pytest tests/unit/test_services_llm.py tests/unit/test_services_redacao.py tests/integration/test_api_assist.py -q
+```
+
+`services/llm.py` e `services/prompts.py` ficam em 100% de cobertura; a suíte
+completa passa de 99% e satisfaz o `fail_under=85`.

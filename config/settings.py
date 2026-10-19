@@ -279,6 +279,38 @@ MENSAGERIA_BACKOFF_MAX_MS = int(os.environ.get("MENSAGERIA_BACKOFF_MAX_MS", "500
 # batimento. 0 desliga o log (não o consumidor).
 MENSAGERIA_HEARTBEAT_S = int(os.environ.get("MENSAGERIA_HEARTBEAT_S", "60"))
 
+# Aula 14: camada de Inteligência Artificial — `llm_service` (Camada 4 da
+# arquitetura-alvo). A API fala com um provedor de LLM compatível com a API de
+# Chat Completions (OpenAI/DeepSeek). A chave **não tem default**: sem
+# `LLM_API_KEY` o endpoint `/api/v1/assist` responde 503 e nada é enviado — é
+# melhor falhar de forma visível do que mandar dado para um provedor errado.
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
+LLM_MODEL = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+# Timeout por tentativa (≤5s): o assistente não pode prender a requisição mais do
+# que o usuário tolera esperar; sem timeout, uma queda do provedor vira um worker
+# do Gunicorn ocupado indefinidamente.
+LLM_TIMEOUT_S = float(os.environ.get("LLM_TIMEOUT_S", "5"))
+# Retry com backoff exponencial + jitter (1 tentativa inicial + N retentativas).
+LLM_MAX_TENTATIVAS = int(os.environ.get("LLM_MAX_TENTATIVAS", "3"))
+LLM_BACKOFF_BASE_MS = int(os.environ.get("LLM_BACKOFF_BASE_MS", "250"))
+LLM_BACKOFF_MAX_MS = int(os.environ.get("LLM_BACKOFF_MAX_MS", "5000"))
+# Circuit breaker: falhas consecutivas que abrem o circuito e o tempo de repouso
+# antes de permitir uma tentativa de prova (half-open).
+LLM_CIRCUITO_LIMITE_FALHAS = int(os.environ.get("LLM_CIRCUITO_LIMITE_FALHAS", "3"))
+LLM_CIRCUITO_RESET_SEGUNDOS = int(os.environ.get("LLM_CIRCUITO_RESET_SEGUNDOS", "30"))
+# Limite duro de `max_tokens` aceito no payload: o cliente pede, o servidor limita
+# — é o teto de custo por chamada.
+LLM_MAX_TOKENS_LIMITE = int(os.environ.get("LLM_MAX_TOKENS_LIMITE", "1024"))
+# Estimativa de custo por chamada (preço por 1M de tokens). Configurável por
+# modelo; 0 quando não há preço conhecido (a telemetria ainda conta tokens).
+LLM_PRECO_PROMPT_USD_MILHAO = float(
+    os.environ.get("LLM_PRECO_PROMPT_USD_MILHAO", "0")
+)
+LLM_PRECO_OUTPUT_USD_MILHAO = float(
+    os.environ.get("LLM_PRECO_OUTPUT_USD_MILHAO", "0")
+)
+
 # Prazo de validade da chave de deduplicação (idempotência do consumidor).
 IDEMPOTENCIA_TTL_SEGUNDOS = int(os.environ.get("IDEMPOTENCIA_TTL_SEGUNDOS", "86400"))
 
