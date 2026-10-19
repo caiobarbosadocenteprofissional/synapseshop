@@ -36,51 +36,33 @@ torna o cenário reproduzível. É um gancho de teste, não de produção: exist
 que o caminho de falha seja observável sem alterar o código.
 """
 
-import logging
 import os
 import sys
-from fnmatch import fnmatchcase
 from typing import Any, Dict
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
-
-import django  # noqa: E402  (após o ajuste de sys.path e DJANGO_SETTINGS_MODULE)
-
-django.setup()
+from workers.comum import (  # noqa: E402  (bootstrap do Django e do sys.path)
+    ErroForcadoDeTeste,
+    destino_log,
+    executar_worker,
+    falha_forcada,
+)
 
 from django.conf import settings  # noqa: E402
 
 from events.contracts import EVENTO_PAGAMENTO_PROCESSADO  # noqa: E402
-from events.topology import topologia_de  # noqa: E402
-from services import idempotencia  # noqa: E402
 from services import notificacao  # noqa: E402
-from services.log_estruturado import log_evento  # noqa: E402
-from services.messaging import ConsumidorEvento  # noqa: E402
-
-logger = logging.getLogger("synapseshop.worker")
-
-
-class ErroForcadoDeTeste(RuntimeError):
-    """Falha proposital para exercitar a reentrega e a DLQ (DoD da Aula 11)."""
-
-
-def _log(nome_evento: str, **campos: Any) -> None:
-    log_evento(logger, nome_evento, **campos)
 
 
 def _falha_forcada(candidatos) -> bool:
     """Informa se este pagamento deve falhar de propósito (validação da DLQ)."""
-    if os.environ.get("NOTIFICACAO_WORKER_FALHAR_SEMPRE", "").lower() in ("1", "true", "yes"):
-        return True
-    return any(
-        fnmatchcase(candidato, padrao)
-        for candidato in candidatos
-        for padrao in settings.NOTIFICACAO_WORKER_FALHA_IDEM_KEYS
-        if candidato
+    return falha_forcada(
+        candidatos,
+        "NOTIFICACAO_WORKER_FALHAR_SEMPRE",
+        settings.NOTIFICACAO_WORKER_FALHA_IDEM_KEYS,
     )
 
 
@@ -104,53 +86,18 @@ def processar(bruto: Dict[str, Any], tentativa: int) -> None:
 
 
 def _destino_log() -> dict:
-    """Nome da fila/tópico de trabalho e da DLQ, conforme o broker ativo.
-
-    O log de subida precisa dizer onde a mensagem entra e onde a morta sai, e os
-    dois nomes são diferentes entre AMQP e Kafka. Tudo vem da topologia do evento,
-    então este log não pode divergir do que o produtor usou.
-    """
-    topologia = topologia_de(EVENTO_PAGAMENTO_PROCESSADO)
-    if settings.MENSAGERIA_BROKER == "kafka":
-        return {
-            "broker": "kafka",
-            "evento": topologia.evento,
-            "topico": topologia.topico,
-            "dlq": topologia.dlq,
-            "grupo": topologia.grupo,
-            "particoes": settings.KAFKA_PARTICOES,
-        }
-    return {
-        "broker": "rabbitmq",
-        "evento": topologia.evento,
-        "fila": topologia.fila,
-        "dlq": topologia.fila_dlq,
-        "prefetch": settings.RABBITMQ_PREFETCH,
-    }
+    """Nome da fila/tópico de trabalho e da DLQ, conforme o broker ativo."""
+    return dict(destino_log(EVENTO_PAGAMENTO_PROCESSADO))
 
 
 def main() -> None:
-    consumidor = ConsumidorEvento(
-        processar,
-        topologia_de(EVENTO_PAGAMENTO_PROCESSADO),
+    executar_worker(
+        nome="notificacao",
+        evento=EVENTO_PAGAMENTO_PROCESSADO,
+        handler=processar,
         client_id="synapseshop-notificacao-worker",
+        falha_ativa=settings.NOTIFICACAO_WORKER_FALHA_IDEM_KEYS,
     )
-    # As chaves de deduplicação têm prazo de validade: as expiradas são
-    # descartadas na subida do worker para a tabela não crescer sem limite.
-    expiradas = idempotencia.limpar_expirados()
-    _log(
-        "worker.iniciado",
-        worker="notificacao",
-        max_retries=settings.MENSAGERIA_MAX_RETRIES,
-        idempotencia_ttl=settings.IDEMPOTENCIA_TTL_SEGUNDOS,
-        chaves_expiradas_removidas=expiradas,
-        falha_forcada=bool(settings.NOTIFICACAO_WORKER_FALHA_IDEM_KEYS),
-        **_destino_log(),
-    )
-    try:
-        consumidor.executar()
-    finally:
-        _log("worker.encerrado", worker="notificacao")
 
 
 if __name__ == "__main__":

@@ -34,44 +34,31 @@ caminho feliz e o caminho de falha no mesmo ambiente. Os padrões aceitam
 ``fnmatch`` (``*``, ``?``), então a chave do teste pode ser única por execução.
 """
 
-import logging
 import os
 import sys
 import time
-from fnmatch import fnmatchcase
 from typing import Any, Dict
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
-
-import django  # noqa: E402  (após o ajuste de sys.path e DJANGO_SETTINGS_MODULE)
-
-django.setup()
+from workers.comum import (  # noqa: E402  (bootstrap do Django e do sys.path)
+    ErroForcadoDeTeste,
+    _log,
+    destino_log,
+    executar_worker,
+    falha_forcada,
+)
 
 from django.conf import settings  # noqa: E402
 from django.db import transaction  # noqa: E402
 from django.utils import timezone  # noqa: E402
 
 from events.contracts import ContratoInvalido, EVENTO_PEDIDO_CRIADO, EventoPedidoCriado  # noqa: E402
-from events.topology import topologia_de  # noqa: E402
 from repositories.models import Pedido  # noqa: E402
 from services import idempotencia  # noqa: E402
 from services.events import PEDIDO_EM_PROCESSAMENTO, emitir_apos_commit  # noqa: E402
-from services.log_estruturado import log_evento  # noqa: E402
-from services.messaging import ConsumidorEvento  # noqa: E402
-
-logger = logging.getLogger("synapseshop.worker")
-
-
-def _log(nome_evento: str, **campos: Any) -> None:
-    log_evento(logger, nome_evento, **campos)
-
-
-class ErroForcadoDeTeste(RuntimeError):
-    """Falha proposital para exercitar a reentrega e a DLQ (DoD da Aula 9)."""
 
 
 class PedidoInexistente(RuntimeError):
@@ -80,11 +67,10 @@ class PedidoInexistente(RuntimeError):
 
 def _falha_forcada(idempotency_key: str) -> bool:
     """Informa se este pedido deve falhar de propósito (validação da DLQ)."""
-    if os.environ.get("PEDIDO_WORKER_FALHAR_SEMPRE", "").lower() in ("1", "true", "yes"):
-        return True
-    return any(
-        fnmatchcase(idempotency_key, padrao)
-        for padrao in settings.PEDIDO_WORKER_FALHA_IDEM_KEYS
+    return falha_forcada(
+        [idempotency_key],
+        "PEDIDO_WORKER_FALHAR_SEMPRE",
+        settings.PEDIDO_WORKER_FALHA_IDEM_KEYS,
     )
 
 
@@ -152,54 +138,18 @@ def processar_pedido_criado(bruto: Dict[str, Any], tentativa: int) -> None:
 
 
 def _destino_log() -> dict:
-    """Nome da fila/tópico de trabalho e da DLQ, conforme o broker ativo.
-
-    O log de subida precisa dizer onde a mensagem entra e onde a morta sai, e os
-    dois nomes são diferentes entre AMQP e Kafka. A política (tentativas, TTL) é
-    a mesma e vem sempre das mesmas settings; os nomes vêm da topologia do evento,
-    que este worker consome — o mesmo par de ``main()``.
-    """
-    topologia = topologia_de(EVENTO_PEDIDO_CRIADO)
-    if settings.MENSAGERIA_BROKER == "kafka":
-        return {
-            "broker": "kafka",
-            "evento": topologia.evento,
-            "topico": topologia.topico,
-            "dlq": topologia.dlq,
-            "grupo": topologia.grupo,
-            "particoes": settings.KAFKA_PARTICOES,
-        }
-    return {
-        "broker": "rabbitmq",
-        "evento": topologia.evento,
-        "fila": topologia.fila,
-        "dlq": topologia.fila_dlq,
-        "prefetch": settings.RABBITMQ_PREFETCH,
-    }
+    """Nome da fila/tópico de trabalho e da DLQ, conforme o broker ativo."""
+    return dict(destino_log(EVENTO_PEDIDO_CRIADO))
 
 
 def main() -> None:
-    consumidor = ConsumidorEvento(
-        processar_pedido_criado,
-        topologia_de(EVENTO_PEDIDO_CRIADO),
+    executar_worker(
+        nome="pedido",
+        evento=EVENTO_PEDIDO_CRIADO,
+        handler=processar_pedido_criado,
         client_id="synapseshop-pedido-worker",
+        falha_ativa=settings.PEDIDO_WORKER_FALHA_IDEM_KEYS,
     )
-    # As chaves de deduplicação têm prazo de validade: as expiradas são
-    # descartadas na subida do worker para a tabela não crescer sem limite.
-    expiradas = idempotencia.limpar_expirados()
-    _log(
-        "worker.iniciado",
-        worker="pedido",
-        max_retries=settings.MENSAGERIA_MAX_RETRIES,
-        idempotencia_ttl=settings.IDEMPOTENCIA_TTL_SEGUNDOS,
-        chaves_expiradas_removidas=expiradas,
-        falha_forcada=bool(settings.PEDIDO_WORKER_FALHA_IDEM_KEYS),
-        **_destino_log(),
-    )
-    try:
-        consumidor.executar()
-    finally:
-        _log("worker.encerrado", worker="pedido")
 
 
 if __name__ == "__main__":
