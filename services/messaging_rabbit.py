@@ -36,7 +36,6 @@ sua DLQ, declarados a partir de ``events/topology.py``.
 """
 
 import json
-import logging
 import time
 import uuid
 from typing import Any, Callable, Dict, Optional
@@ -45,15 +44,15 @@ import pika
 from django.conf import settings
 
 from events.topology import TopologiaEvento, topologias
-from services.log_estruturado import log_evento
-
-logger = logging.getLogger("synapseshop.mensageria")
-
-HEADER_TENTATIVA = "x-retry-count"
-
-
-class MensageriaIndisponivel(RuntimeError):
-    """O broker não pôde ser alcançado ou recusou a publicação."""
+from services.messaging_base import (
+    HEADER_ERRO,
+    HEADER_TENTATIVA,
+    MensageriaIndisponivel,
+    _log,
+    esperar_reentrega,
+    ler_tentativa,
+    serializar_evento,
+)
 
 
 def _conexao(client_id: str = "") -> pika.BlockingConnection:
@@ -79,10 +78,6 @@ def _conexao(client_id: str = "") -> pika.BlockingConnection:
         client_properties={"connection_name": client_id} if client_id else None,
     )
     return pika.BlockingConnection(parametros)
-
-
-def _log(nome_evento: str, **campos: Any) -> None:
-    log_evento(logger, nome_evento, **campos)
 
 
 class ProdutorEvento:
@@ -127,7 +122,7 @@ class ProdutorEvento:
 
     def publicar(self, evento: Dict[str, Any], idempotency_key: str) -> str:
         """Publica o evento e devolve o ``correlation_id`` da entrega."""
-        corpo = json.dumps(evento, ensure_ascii=False).encode("utf-8")
+        corpo = serializar_evento(evento)
         correlation_id = str(evento.get("correlation_id") or uuid.uuid4())
         propriedades = pika.BasicProperties(
             content_type="application/json",
@@ -204,15 +199,6 @@ def declarar_topologia(canal) -> None:
     canal.basic_qos(prefetch_count=settings.RABBITMQ_PREFETCH)
 
 
-def _esperar_reentrega(tentativa: int) -> float:
-    """Recuo exponencial limitado por ``MENSAGERIA_BACKOFF_MAX_MS``."""
-    atraso_ms = min(
-        settings.MENSAGERIA_BACKOFF_BASE_MS * (2 ** (tentativa - 1)),
-        settings.MENSAGERIA_BACKOFF_MAX_MS,
-    )
-    return atraso_ms / 1000.0
-
-
 class ConsumidorEvento:
     """Consome um evento com *ack* manual, reentrega e DLQ.
 
@@ -286,15 +272,8 @@ class ConsumidorEvento:
         self._canal = None
         self._conexao = None
 
-    def _tentativa(self, propriedades) -> int:
-        cabecalhos = getattr(propriedades, "headers", None) or {}
-        try:
-            return int(cabecalhos.get(HEADER_TENTATIVA, 0) or 0)
-        except (TypeError, ValueError):
-            return 0
-
     def _ao_receber(self, canal, metodo, propriedades, corpo: bytes) -> None:
-        tentativa = self._tentativa(propriedades)
+        tentativa = ler_tentativa(getattr(propriedades, "headers", None))
         correlation_id = getattr(propriedades, "correlation_id", None)
         iniciado = time.perf_counter()
         try:
@@ -330,10 +309,10 @@ class ConsumidorEvento:
             return
 
         proxima = tentativa + 1
-        espera = _esperar_reentrega(proxima)
+        espera = esperar_reentrega(proxima)
         cabecalhos = dict(getattr(propriedades, "headers", None) or {})
         cabecalhos[HEADER_TENTATIVA] = proxima
-        cabecalhos["x-ultimo-erro"] = str(exc)[:500]
+        cabecalhos[HEADER_ERRO] = str(exc)[:500]
 
         republicada = canal.basic_publish(
             exchange=self._topologia.exchange,
