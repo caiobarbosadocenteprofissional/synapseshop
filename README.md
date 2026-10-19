@@ -683,8 +683,8 @@ estrutura de módulos, observabilidade e operação detalhada em
 
 Suíte `pytest` organizada em `tests/unit` (ramos felizes e de erro, parametrizados)
 e `tests/integration` (ciclo de vida completo dos recursos na API), com cobertura
-global mínima de **85%** (.coveragerc). A execução atual mede **99,91%** do código
-aplicacional de `services`, `events`, `api`, `config` e `repositories`.
+global mínima de **85%** (.coveragerc). A execução atual mede **98,1%** do código
+aplicacional de `services`, `events`, `api`, `config`, `repositories` e `workers`.
 
 ### Execução
 
@@ -694,6 +694,10 @@ python -m pytest tests/unit            # somente unitários
 python -m pytest tests/integration     # somente integração
 pytest --cov --cov-report=term-missing # relatório detalhado linha a linha
 ```
+
+No PowerShell, os atalhos de `tasks.ps1` cobrem o dia a dia: `.\tasks.ps1 test`,
+`.\tasks.ps1 openapi`, `.\tasks.ps1 check`, `.\tasks.ps1 smoke` e
+`.\tasks.ps1 mensageria` (sem argumento, lista tudo).
 
 O `pytest.ini` já define `DJANGO_SETTINGS_MODULE=config.settings_test`
 (`config/settings_test.py`): SQLite em memória, `LocMemCache` (`CACHE_ENABLED=True`),
@@ -828,6 +832,7 @@ então o ambiente também sobe sem `.env` (com os valores de dev).
 | Arquivo | Descrição |
 | :--- | :--- |
 | [`README.md`](README.md) | Visão geral do projeto, equipe, domínio, MVP e arquitetura. |
+| [`docs/INDICE.md`](docs/INDICE.md) | Índice por assunto de toda a documentação. |
 | [`PROMPTS.md`](PROMPTS.md) | Histórico do uso de IA generativa (prompts utilizados pela equipe). |
 | [`PROMPTS-TEMPLATE.md`](PROMPTS-TEMPLATE.md) | Template padrão de prompts de IA da squad. |
 | [`specs/PROJECT_OVERVIEW.MD`](specs/PROJECT_OVERVIEW.MD) | Visão geral do SynapseShop e trilha de entregas (25 aulas). |
@@ -847,6 +852,7 @@ então o ambiente também sobe sem `.env` (com os valores de dev).
 | [`docs/CHECKLIST_IA_SAFE.md`](docs/CHECKLIST_IA_SAFE.md) · [`docs/BACKLOG_AULA14.md`](docs/BACKLOG_AULA14.md) | Revisão de código gerado por IA e pendências futuras. |
 | [`docs/postman/SynapseShop.postman_collection.json`](docs/postman/SynapseShop.postman_collection.json) · [environment](docs/postman/SynapseShop_Local.postman_environment.json) | Coleção consolidada das Aulas 4, 7 e 13 (46 requisições). |
 | [`pytest.ini`](pytest.ini) · [`.coveragerc`](.coveragerc) · [`config/settings_test.py`](config/settings_test.py) | Infraestrutura da suíte de testes (settings, fakes e escopo de cobertura). |
+| [`tasks.ps1`](tasks.ps1) · [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | Atalhos operacionais e pipeline de testes + validação do OpenAPI. |
 
 **Arquivo histórico** (entregas superadas, preservadas para consulta)
 

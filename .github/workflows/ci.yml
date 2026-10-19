@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+jobs:
+  testes:
+    name: Testes e contrato
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Dependencias
+        run: pip install -r requirements.txt
+
+      - name: Suite com cobertura
+        run: python -m pytest -q
+
+      - name: Drift do OpenAPI
+        run: python scripts/validar_openapi.py
+
+      - name: Configuracao do Django
+        run: python manage.py check
