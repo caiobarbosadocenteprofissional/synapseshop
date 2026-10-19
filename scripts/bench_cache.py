@@ -21,26 +21,17 @@ import statistics
 import sys
 import time
 import urllib.error
-import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
+from _comum import ADMIN, pedir
+
 DEFAULT_BASE_URL = "http://localhost:8000"
-ADMIN = {"username": "admin", "password": "admin"}
-
-
-def _request(method, url, data=None, token=None, timeout=15):
-    body = json.dumps(data).encode() if data is not None else None
-    headers = {"Content-Type": "application/json"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    request = urllib.request.Request(url, method=method, data=body, headers=headers)
-    with urllib.request.urlopen(request, timeout=timeout) as res:
-        raw = res.read()
-        return res.status, (json.loads(raw) if raw else None), dict(res.headers)
 
 
 def login(base_url):
-    status, payload, _ = _request("POST", f"{base_url}/api/v1/auth/token/", ADMIN)
+    status, payload, _ = pedir(
+        "POST", f"{base_url}/api/v1/auth/token/", ADMIN, base=""
+    )
     if status != 200 or "access" not in payload:
         sys.exit(f"Falha no login do benchmark (HTTP {status}): {payload}")
     return payload["access"]
@@ -49,7 +40,7 @@ def login(base_url):
 def _measure_one(url, token, results):
     started = time.perf_counter()
     try:
-        status, _, headers = _request("GET", url, token=token)
+        status, _, headers = pedir("GET", url, token=token, base="")
         elapsed = (time.perf_counter() - started) * 1000
         results.append((status, elapsed, headers.get("X-Cache", "-"), None))
     except urllib.error.HTTPError as exc:

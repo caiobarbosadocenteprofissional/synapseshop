@@ -56,14 +56,12 @@ import os
 import statistics
 import sys
 import time
-import urllib.error
-import urllib.request
 from datetime import datetime
 from uuid import uuid4
 
-BASE_URL = os.environ.get("BENCH_BASE_URL", "http://localhost:8000")
-ADMIN = {"username": "admin", "password": "admin"}
-USER = {"username": "user", "password": "user"}
+from _comum import ADMIN, USER, configurar_base, management, pedir
+
+BASE_URL = configurar_base(os.environ.get("BENCH_BASE_URL", "http://localhost:8000"))
 BROKER = os.environ.get("MENSAGERIA_BROKER", "kafka").strip().lower()
 KAFKA_SERVERS = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 TOPICO = os.environ.get("KAFKA_TOPICO_PEDIDO_CRIADO", "pedidos.pedidocriado")
@@ -125,43 +123,17 @@ def _backlog():
             return None
 
     try:
-        import base64
-
-        credencial = base64.b64encode(
-            f"{RABBITMQ_USER}:{RABBITMQ_PASSWORD}".encode()
-        ).decode()
-        requisicao = urllib.request.Request(
+        fila = management(
             f"{RABBITMQ_API}/api/queues/%2F/{FILA}",
-            headers={"Authorization": f"Basic {credencial}"},
+            RABBITMQ_USER,
+            RABBITMQ_PASSWORD,
         )
-        with urllib.request.urlopen(requisicao, timeout=15) as resposta:
-            fila = json.loads(resposta.read())
         # `messages` é what's ready + unacked; os não confirmados também contam
         # como trabalho em voo.
         return (fila.get("messages") or 0) + (fila.get("messages_unacknowledged") or 0)
     except Exception as exc:  # noqa: BLE001
         print(f"  ..    leitura da fila falhou: {exc}")
         return None
-
-
-def _req(metodo, caminho, dados=None, token=None, timeout=30):
-    corpo = json.dumps(dados).encode() if dados is not None else None
-    cabecalhos = {"Content-Type": "application/json"}
-    if token:
-        cabecalhos["Authorization"] = f"Bearer {token}"
-    requisicao = urllib.request.Request(
-        f"{BASE_URL}{caminho}", method=metodo, data=corpo, headers=cabecalhos
-    )
-    try:
-        with urllib.request.urlopen(requisicao, timeout=timeout) as resposta:
-            bruto = resposta.read()
-            return resposta.status, (json.loads(bruto) if bruto else None)
-    except urllib.error.HTTPError as exc:
-        bruto = exc.read()
-        try:
-            return exc.code, json.loads(bruto)
-        except json.JSONDecodeError:
-            return exc.code, None
 
 
 _JANELA_THROTTLE_ESPERADA = False
@@ -178,12 +150,12 @@ def _req_tolerante(metodo, caminho, dados=None, token=None, timeout=30):
     lentas.
     """
     global _JANELA_THROTTLE_ESPERADA
-    status, payload = _req(metodo, caminho, dados, token, timeout)
+    status, payload, _ = pedir(metodo, caminho, dados, token, timeout)
     if status == 429 and not _JANELA_THROTTLE_ESPERADA:
         print("  ..    throttle atingido; aguardando a janela de 60s para continuar")
         time.sleep(61)
         _JANELA_THROTTLE_ESPERADA = True
-        status, payload = _req(metodo, caminho, dados, token, timeout)
+        status, payload, _ = pedir(metodo, caminho, dados, token, timeout)
     return status, payload
 
 
@@ -214,7 +186,7 @@ def _resumo(valores):
 
 
 def _token(credenciais):
-    status, payload = _req("POST", "/api/v1/auth/token/", credenciais)
+    status, payload, _ = pedir("POST", "/api/v1/auth/token/", credenciais)
     if status != 200 or not payload or "access" not in payload:
         raise SystemExit(f"login falhou para {credenciais['username']}: {status}")
     return payload["access"]

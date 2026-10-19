@@ -37,16 +37,25 @@ Determinismo: cada execução usa ``idempotency_key`` com sufixo temporal, e as
 esperas são por condição (o estado desejado aparece) e não por tempo fixo.
 """
 
-import json
 import os
 import sys
 import time
-import urllib.error
-import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-BASE_URL = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8000"
+from _comum import (  # noqa: E402
+    ADMIN,
+    USER,
+    Relatorio,
+    configurar_base,
+    contar_mortas_dlq,
+    header,
+    pedir,
+)
+
+BASE_URL = configurar_base(
+    sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8000"
+)
 BROKER = os.environ.get("MENSAGERIA_BROKER", "kafka").strip().lower()
 
 # Inspeção da DLQ do segundo elo, no broker ativo.
@@ -69,62 +78,9 @@ CHAVE_APROVADO = f"pedido-fluxo-aprovado-{MARCA}"
 CHAVE_RECUSADO = f"pedido-fluxo-recusado-{MARCA}"
 CHAVE_DLQ = f"pedido-dlq-fluxo-{MARCA}"
 
-passed = 0
-failed = 0
-skipped = 0
-
-
-def _req(metodo, caminho, dados=None, token=None, base=None):
-    corpo = json.dumps(dados).encode() if dados is not None else None
-    cabecalhos = {"Content-Type": "application/json"}
-    if token:
-        cabecalhos["Authorization"] = f"Bearer {token}"
-    requisicao = urllib.request.Request(
-        f"{base or BASE_URL}{caminho}", method=metodo, data=corpo, headers=cabecalhos
-    )
-    try:
-        with urllib.request.urlopen(requisicao, timeout=30) as resposta:
-            bruto = resposta.read()
-            cabecalhos_resposta = dict(resposta.headers)
-            return (
-                resposta.status,
-                (json.loads(bruto) if bruto else None),
-                cabecalhos_resposta,
-            )
-    except urllib.error.HTTPError as exc:
-        bruto = exc.read()
-        try:
-            return exc.code, json.loads(bruto), dict(exc.headers)
-        except json.JSONDecodeError:
-            return exc.code, None, dict(exc.headers)
-
-
-def _header(cabecalhos, nome):
-    """Header sem depender da grafia: HTTP não diferencia maiúsculas."""
-    if not cabecalhos:
-        return None
-    alvo = nome.lower()
-    for chave, valor in cabecalhos.items():
-        if chave.lower() == alvo:
-            return valor
-    return None
-
-
-def check(nome, condicao, extra=""):
-    global passed, failed
-    if condicao:
-        passed += 1
-        print(f"  PASS  {nome} {extra}")
-    else:
-        failed += 1
-        print(f"  FAIL  {nome} {extra}")
-
-
-def skip(nome, motivo):
-    global skipped
-    skipped += 1
-    print(f"  SKIP  {nome}")
-    print(f"        {motivo}")
+relatorio = Relatorio(f"== Smoke test do fluxo da Aula 11 (broker: {BROKER}) ==")
+check = relatorio.check
+skip = relatorio.skip
 
 
 def aguardar_status(pedido_id, token, desejado, tentativas=30, intervalo=0.5):
@@ -134,7 +90,7 @@ def aguardar_status(pedido_id, token, desejado, tentativas=30, intervalo=0.5):
     total varia com a fila, com o rebalanceamento do grupo e com o clock.
     """
     for _ in range(tentativas):
-        status, payload, _ = _req("GET", f"/api/v1/pedidos/{pedido_id}/", token=token)
+        status, payload, _ = pedir("GET", f"/api/v1/pedidos/{pedido_id}/", token=token)
         if status == 200 and payload and payload.get("status") in desejado:
             return payload
         time.sleep(intervalo)
@@ -144,7 +100,7 @@ def aguardar_status(pedido_id, token, desejado, tentativas=30, intervalo=0.5):
 def aguardar_notificacao(pedido_id, token, tentativas=30, intervalo=0.5):
     """Aguarda a notificação do pedido aparecer em ``GET /api/v1/notificacoes/``."""
     for _ in range(tentativas):
-        status, payload, _ = _req("GET", "/api/v1/notificacoes/?page_size=50", token=token)
+        status, payload, _ = pedir("GET", "/api/v1/notificacoes/?page_size=50", token=token)
         resultados = (payload or {}).get("results") or []
         for linha in resultados:
             if linha.get("pedido") == pedido_id:
@@ -154,14 +110,14 @@ def aguardar_notificacao(pedido_id, token, tentativas=30, intervalo=0.5):
 
 
 def contar_notificacoes(pedido_id, token):
-    status, payload, _ = _req("GET", "/api/v1/notificacoes/?page_size=50", token=token)
+    status, payload, _ = pedir("GET", "/api/v1/notificacoes/?page_size=50", token=token)
     if status != 200:
         return None
     return len([n for n in (payload or {}).get("results") or [] if n.get("pedido") == pedido_id])
 
 
 def criar_pedido(token, item_id, chave):
-    status, payload, _ = _req(
+    status, payload, _ = pedir(
         "POST",
         "/api/v1/pedidos/",
         {"idempotency_key": chave, "itens": [{"item_id": item_id, "quantidade": 2}]},
@@ -175,51 +131,25 @@ def criar_pedido(token, item_id, chave):
 
 def contar_mortas():
     """Quantas mensagens estão na DLQ de ``PagamentoProcessado``."""
-    if BROKER == "kafka":
-        from confluent_kafka import Consumer, TopicPartition
-
-        consumidor = Consumer({"bootstrap.servers": KAFKA_SERVERS, "group.id": "smoke-fluxo"})
-        try:
-            metadata = consumidor.list_topics(TOPICO_DLQ, timeout=15)
-            if TOPICO_DLQ not in metadata.topics:
-                return 0
-            total = 0
-            for particao in metadata.topics[TOPICO_DLQ].partitions:
-                marca = TopicPartition(TOPICO_DLQ, particao)
-                inicio, fim = consumidor.get_watermark_offsets(marca, timeout=10, cached=False)
-                total += max(fim - inicio, 0)
-            return total
-        except Exception as exc:  # noqa: BLE001
-            print(f"  ..    contagem da DLQ falhou: {exc}")
-            return None
-        finally:
-            consumidor.close()
-
-    import base64
-
-    requisicao = urllib.request.Request(f"{RABBITMQ_API}/api/queues/%2F/{FILA_DLQ}")
-    cabecalhos = {
-        "Authorization": "Basic "
-        + base64.b64encode(f"{RABBITMQ_USER}:{RABBITMQ_PASSWORD}".encode()).decode()
-    }
-    requisicao.add_header(*list(cabecalhos.items())[0])
-    try:
-        with urllib.request.urlopen(requisicao, timeout=15) as resposta:
-            return json.loads(resposta.read()).get("messages")
-    except Exception as exc:  # noqa: BLE001
-        print(f"  ..    contagem da DLQ falhou: {exc}")
-        return None
+    return contar_mortas_dlq(
+        BROKER,
+        kafka_servers=KAFKA_SERVERS,
+        topico=TOPICO_DLQ,
+        fila=FILA_DLQ,
+        rabbit_api=RABBITMQ_API,
+        usuario=RABBITMQ_USER,
+        senha=RABBITMQ_PASSWORD,
+        grupo="smoke-fluxo",
+    )
 
 
 # --- início -------------------------------------------------------------------
 
 
-print(f"== Smoke test do fluxo da Aula 11 (broker: {BROKER}) ==")
-
-status, payload, _ = _req("GET", "/health")
+status, payload, _ = pedir("GET", "/health")
 check("liveness /health (200)", status == 200 and (payload or {}).get("status") == "ok", f"-> {status}")
 
-status, payload, _ = _req("GET", "/health/pronto")
+status, payload, _ = pedir("GET", "/health/pronto")
 pronto = (payload or {}).get("pronto")
 check("readiness /health/pronto (200)", status == 200 and pronto, f"-> {status}")
 dependencias = (payload or {}).get("dependencias") or {}
@@ -229,17 +159,17 @@ check(
     f"-> {list(dependencias)}",
 )
 
-status, payload, _ = _req("POST", "/api/v1/auth/token/", ADMIN)
+status, payload, _ = pedir("POST", "/api/v1/auth/token/", ADMIN)
 check("login admin (200)", status == 200 and "access" in (payload or {}), f"-> {status}")
 token = (payload or {}).get("access", "")
 
-status, payload, _ = _req("POST", "/api/v1/auth/token/", USER)
+status, payload, _ = pedir("POST", "/api/v1/auth/token/", USER)
 check("login user (200)", status == 200 and "access" in (payload or {}), f"-> {status}")
 token_user = (payload or {}).get("access", "")
 
 # --- dados exclusivos deste teste ---------------------------------------------
 
-status, payload, _ = _req(
+status, payload, _ = pedir(
     "POST",
     "/api/v1/categories/",
     {"name": f"Cat Fluxo {MARCA}", "description": "Smoke test do fluxo da Aula 11"},
@@ -248,7 +178,7 @@ status, payload, _ = _req(
 check("criar categoria de teste (201)", status == 201, f"-> {status}")
 categoria_id = (payload or {}).get("id")
 
-status, payload, _ = _req(
+status, payload, _ = pedir(
     "POST",
     "/api/v1/items/",
     {"name": f"Item Fluxo {MARCA}", "price": "89.90", "category": categoria_id},
@@ -275,13 +205,13 @@ pedido_aprovado_id = (pedido_aprovado or {}).get("id")
 # por `PROCESSANDO` consulta o mesmo detalhe e portanto aquece o cache, o que
 # faria o primeiro `MISS` ser falso.
 
-status, primeira_leitura, cabecalhos = _req(
+status, primeira_leitura, cabecalhos = pedir(
     "GET", f"/api/v1/pedidos/{pedido_aprovado_id}/", token=token_user
 )
 check(
     "detalhe do pedido: MISS na primeira leitura",
-    _header(cabecalhos, "X-Cache") == "MISS",
-    f"-> {_header(cabecalhos, 'X-Cache')}",
+    header(cabecalhos, "X-Cache") == "MISS",
+    f"-> {header(cabecalhos, 'X-Cache')}",
 )
 check(
     "detalhe do pedido: cache devolve o registro persistido",
@@ -291,11 +221,11 @@ check(
     f"-> status {(primeira_leitura or {}).get('status')}",
 )
 
-status, _, cabecalhos = _req("GET", f"/api/v1/pedidos/{pedido_aprovado_id}/", token=token_user)
+status, _, cabecalhos = pedir("GET", f"/api/v1/pedidos/{pedido_aprovado_id}/", token=token_user)
 check(
     "detalhe do pedido: HIT na segunda leitura",
-    _header(cabecalhos, "X-Cache") == "HIT",
-    f"-> {_header(cabecalhos, 'X-Cache')}",
+    header(cabecalhos, "X-Cache") == "HIT",
+    f"-> {header(cabecalhos, 'X-Cache')}",
 )
 
 # --- 3. consumo de PedidoCriado e invalidação pelo pedido-worker --------------
@@ -307,17 +237,17 @@ check("pedido-worker consumiu PedidoCriado (PROCESSANDO)", processando is not No
 # MISS posterior poderia ser atribuído à invalidação atrasada do PROCESSANDO e o
 # teste "provaria" a invalidação do pagamento sem que ela tivesse ocorrido.
 time.sleep(2.0)
-_req("GET", f"/api/v1/pedidos/{pedido_aprovado_id}/", token=token_user)
-status, _, cabecalhos = _req("GET", f"/api/v1/pedidos/{pedido_aprovado_id}/", token=token_user)
+pedir("GET", f"/api/v1/pedidos/{pedido_aprovado_id}/", token=token_user)
+status, _, cabecalhos = pedir("GET", f"/api/v1/pedidos/{pedido_aprovado_id}/", token=token_user)
 check(
     "cache do detalhe reconecta em HIT antes do pagamento",
-    _header(cabecalhos, "X-Cache") == "HIT",
-    f"-> {_header(cabecalhos, 'X-Cache')}",
+    header(cabecalhos, "X-Cache") == "HIT",
+    f"-> {header(cabecalhos, 'X-Cache')}",
 )
 
 # --- 4. pagamento aprovado ----------------------------------------------------
 
-status, pagamento, _ = _req(
+status, pagamento, _ = pedir(
     "POST", f"/api/v1/pedidos/{pedido_aprovado_id}/pagamento/", {}, token_user
 )
 check("pagamento criado (201)", status == 201, f"-> {status}")
@@ -335,13 +265,13 @@ check("valor do pagamento e o total do pedido", valor_pagamento == total_pedido,
 # quem gravou o pagamento apagou. O `PAGO` no corpo confirma que o valor guardado
 # antes (PROCESSANDO) não sobreviveu.
 
-status, pedido_pago, cabecalhos = _req(
+status, pedido_pago, cabecalhos = pedir(
     "GET", f"/api/v1/pedidos/{pedido_aprovado_id}/", token=token_user
 )
 check(
     "cache invalidado pela gravação do pagamento (novo MISS)",
-    _header(cabecalhos, "X-Cache") == "MISS",
-    f"-> {_header(cabecalhos, 'X-Cache')}",
+    header(cabecalhos, "X-Cache") == "MISS",
+    f"-> {header(cabecalhos, 'X-Cache')}",
 )
 check(
     "detalhe reflete o pagamento (nao veio do cache antigo)",
@@ -371,23 +301,23 @@ if notificacao:
 # mais consultou o detalhe); o que não pode acontecer é o corpo vir sem a
 # notificação, porque isso seria o cache servindo estado velho depois da escrita.
 
-status, pedido_cache, cabecalhos = _req(
+status, pedido_cache, cabecalhos = pedir(
     "GET", f"/api/v1/pedidos/{pedido_aprovado_id}/", token=token_user
 )
 check(
     "detalhe reflete a notificacao gravada pelo worker",
     len((pedido_cache or {}).get("notificacoes") or []) == 1,
-    f"-> X-Cache {_header(cabecalhos, 'X-Cache')}, "
+    f"-> X-Cache {header(cabecalhos, 'X-Cache')}, "
     f"{len((pedido_cache or {}).get('notificacoes') or [])} notificacao(oes)",
 )
 
-status, _, cabecalhos = _req("GET", f"/api/v1/pedidos/{pedido_aprovado_id}/", token=token_user)
-check("cache volta a HIT apos o preenchimento", _header(cabecalhos, "X-Cache") == "HIT", f"-> {_header(cabecalhos, 'X-Cache')}")
+status, _, cabecalhos = pedir("GET", f"/api/v1/pedidos/{pedido_aprovado_id}/", token=token_user)
+check("cache volta a HIT apos o preenchimento", header(cabecalhos, "X-Cache") == "HIT", f"-> {header(cabecalhos, 'X-Cache')}")
 
 # --- 8. idempotência do pagamento (um pagamento por pedido) -------------------
 
 antes = contar_notificacoes(pedido_aprovado_id, token_user)
-status, repetido, cabecalhos = _req(
+status, repetido, cabecalhos = pedir(
     "POST", f"/api/v1/pedidos/{pedido_aprovado_id}/pagamento/", {}, token_user
 )
 check("repetir pagamento devolve 200", status == 200, f"-> {status}")
@@ -401,7 +331,7 @@ time.sleep(1.5)
 depois = contar_notificacoes(pedido_aprovado_id, token_user)
 check("repetir pagamento nao duplica notificacao", antes == depois, f"-> {antes} vs {depois}")
 
-status, repetido_outro, _ = _req(
+status, repetido_outro, _ = pedir(
     "POST",
     f"/api/v1/pedidos/{pedido_aprovado_id}/pagamento/",
     {"resultado": "RECUSADO"},
@@ -419,18 +349,18 @@ status, pedido_recusado = criar_pedido(token_user, item_id, CHAVE_RECUSADO)
 check("criar pedido para recusa (201)", status == 201, f"-> {status}")
 pedido_recusado_id = (pedido_recusado or {}).get("id")
 
-status, _, cabecalhos = _req("GET", f"/api/v1/pedidos/{pedido_recusado_id}/", token=token_user)
+status, _, cabecalhos = pedir("GET", f"/api/v1/pedidos/{pedido_recusado_id}/", token=token_user)
 check(
     "detalhe do pedido recusado: MISS inicial",
-    _header(cabecalhos, "X-Cache") == "MISS",
-    f"-> {_header(cabecalhos, 'X-Cache')}",
+    header(cabecalhos, "X-Cache") == "MISS",
+    f"-> {header(cabecalhos, 'X-Cache')}",
 )
 check(
     "pedido-worker consumiu o segundo PedidoCriado",
     aguardar_status(pedido_recusado_id, token_user, {"PROCESSANDO"}) is not None,
 )
 
-status, pagamento_recusado, _ = _req(
+status, pagamento_recusado, _ = pedir(
     "POST",
     f"/api/v1/pedidos/{pedido_recusado_id}/pagamento/",
     {"resultado": "RECUSADO", "forma_pagamento": "pix"},
@@ -454,27 +384,27 @@ check(
 
 # --- 10. contrato e autorização ------------------------------------------------
 
-status, payload, _ = _req(
+status, payload, _ = pedir(
     "POST", f"/api/v1/pedidos/{pedido_aprovado_id}/pagamento/", {"resultado": "PIXADO"}, token_user
 )
 check("resultado invalido recusado (400)", status == 400, f"-> {status}")
 
-status, payload, _ = _req("POST", "/api/v1/pedidos/99999999/pagamento/", {}, token_user)
+status, payload, _ = pedir("POST", "/api/v1/pedidos/99999999/pagamento/", {}, token_user)
 check("pagamento de pedido inexistente (404)", status == 404, f"-> {status}")
 
-status, payload, _ = _req("POST", f"/api/v1/pedidos/{pedido_aprovado_id}/pagamento/", {}, token)
+status, payload, _ = pedir("POST", f"/api/v1/pedidos/{pedido_aprovado_id}/pagamento/", {}, token)
 check(
     "admin alcança o pagamento do pedido de outro usuario",
     status == 200 and (payload or {}).get("id") == pagamento_id,
     f"-> {status} (devolve o pagamento existente, sem evento novo)",
 )
 
-status, _, cabecalhos = _req("GET", f"/api/v1/pedidos/{pedido_aprovado_id}/")
+status, _, cabecalhos = pedir("GET", f"/api/v1/pedidos/{pedido_aprovado_id}/")
 check("detalhe sem token (401/403)", status in (401, 403), f"-> {status}")
 
 # --- 11. métricas do cache ----------------------------------------------------
 
-status, payload, _ = _req("GET", "/api/v1/cache/stats/", token=token)
+status, payload, _ = pedir("GET", "/api/v1/cache/stats/", token=token)
 endpoints = (payload or {}).get("endpoints") or {}
 check(
     "metricas incluem o detalhe do pedido",
@@ -513,7 +443,7 @@ if pedido_dlq_id is None:
         )
 else:
     print(f"  ..    alvo de DLQ informado: pedido {pedido_dlq_id}")
-    status, pagamento_dlq, _ = _req(
+    status, pagamento_dlq, _ = pedir(
         "POST", f"/api/v1/pedidos/{pedido_dlq_id}/pagamento/", {}, token_user
     )
     check(
@@ -559,8 +489,8 @@ else:
 # então a limpeza tenta, e reporta o que sobrou em vez de afirmar que removeu
 # tudo. O status que volta é 500 porque o DRF não tem tratador para `ProtectedError`
 # — comportamento herdado das aulas anteriores a esta, que a Aula 11 não altera.
-status_item = _req("DELETE", f"/api/v1/items/{item_id}/", token=token)[0]
-status_categoria = _req("DELETE", f"/api/v1/categories/{categoria_id}/", token=token)[0]
+status_item = pedir("DELETE", f"/api/v1/items/{item_id}/", token=token)[0]
+status_categoria = pedir("DELETE", f"/api/v1/categories/{categoria_id}/", token=token)[0]
 removidos = []
 preservados = []
 if status_item in (200, 204):
@@ -575,5 +505,4 @@ print(f"  ..    removidos: {', '.join(removidos) or 'nada'}")
 if preservados:
     print(f"  ..    preservados por integridade referencial: {'; '.join(preservados)}")
 
-print(f"\n== Resultado: {passed} PASS / {failed} FAIL / {skipped} SKIP ==")
-sys.exit(1 if failed else 0)
+sys.exit(relatorio.resultado())

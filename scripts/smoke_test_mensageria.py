@@ -30,21 +30,29 @@ Determinismo: cada execução usa ``idempotency_key`` com um sufixo temporal; a
 chave da DLQ casa com o padrão configurado no worker.
 """
 
-import base64
 import json
 import os
 import sys
 import time
-import urllib.error
-import urllib.request
 from decimal import Decimal
 from uuid import uuid4
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from events.contracts import EventoPedidoCriado, ItemPedidoCriado  # noqa: E402
+from _comum import (  # noqa: E402
+    ADMIN,
+    USER,
+    Relatorio,
+    configurar_base,
+    contar_mortas_dlq,
+    management,
+    pedir,
+)
 
-BASE_URL = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8000"
+BASE_URL = configurar_base(
+    sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8000"
+)
 BROKER = os.environ.get("MENSAGERIA_BROKER", "kafka").strip().lower()
 
 RABBITMQ_API = os.environ.get("RABBITMQ_API", "http://localhost:15672")
@@ -67,52 +75,19 @@ MARCA = str(int(time.time()))
 CHAVE_OK = f"pedido-smoke-{MARCA}"
 CHAVE_DLQ = f"pedido-dlq-{MARCA}"
 
-passed = 0
-failed = 0
-skipped = 0
-
-
-def _req(metodo, caminho, dados=None, token=None, base=None):
-    corpo = json.dumps(dados).encode() if dados is not None else None
-    cabecalhos = {"Content-Type": "application/json"}
-    if token:
-        cabecalhos["Authorization"] = f"Bearer {token}"
-    requisicao = urllib.request.Request(
-        f"{base or BASE_URL}{caminho}", method=metodo, data=corpo, headers=cabecalhos
-    )
-    try:
-        with urllib.request.urlopen(requisicao, timeout=30) as resposta:
-            bruto = resposta.read()
-            return resposta.status, (json.loads(bruto) if bruto else None)
-    except urllib.error.HTTPError as exc:
-        bruto = exc.read()
-        try:
-            return exc.code, json.loads(bruto)
-        except json.JSONDecodeError:
-            return exc.code, None
-
-
-def check(nome, condicao, extra=""):
-    global passed, failed
-    if condicao:
-        passed += 1
-        print(f"  PASS  {nome} {extra}")
-    else:
-        failed += 1
-        print(f"  FAIL  {nome} {extra}")
-
-
-def skip(nome, motivo):
-    global skipped
-    skipped += 1
-    print(f"  SKIP  {nome}")
-    print(f"        {motivo}")
+relatorio = Relatorio(
+    f"== Smoke test da mensageria assíncrona (broker: {BROKER}) =="
+)
+check = relatorio.check
+skip = relatorio.skip
 
 
 def aguardar_pedido_processado(pedido_id, token, tentativas=20, intervalo=0.5):
     """Consulta o pedido até o worker movê-lo de PENDENTE para PROCESSANDO."""
     for _ in range(tentativas):
-        status, payload = _req("GET", f"/api/v1/pedidos/{pedido_id}/", token=token)
+        status, payload, _ = pedir(
+            "GET", f"/api/v1/pedidos/{pedido_id}/", token=token
+        )
         if status == 200 and payload and payload.get("status") == "PROCESSANDO":
             return payload
         time.sleep(intervalo)
@@ -216,13 +191,6 @@ def _kafka_particoes_de(chaves, evento_base):
 # --- RabbitMQ (Aula 9) ------------------------------------------------------
 
 
-def _basic():
-    credencial = base64.b64encode(
-        f"{RABBITMQ_USER}:{RABBITMQ_PASSWORD}".encode()
-    ).decode()
-    return f"Basic {credencial}"
-
-
 def mensagem_da_dlq():
     """Lê (sem consumir) a mensagem mais antiga da DLQ pela Management API."""
     url = f"{RABBITMQ_API}/api/queues/%2F/{DLQ}/get"
@@ -232,15 +200,14 @@ def mensagem_da_dlq():
         "encoding": "auto",
         "truncate": 50000,
     }
-    requisicao = urllib.request.Request(
-        url,
-        data=json.dumps(corpo).encode(),
-        headers={"Content-Type": "application/json", "Authorization": _basic()},
-        method="POST",
-    )
     try:
-        with urllib.request.urlopen(requisicao, timeout=15) as resposta:
-            mensagens = json.loads(resposta.read())
+        mensagens = management(
+            url,
+            RABBITMQ_USER,
+            RABBITMQ_PASSWORD,
+            metodo="POST",
+            dados=corpo,
+        )
         if not mensagens:
             return None
         morta = mensagens[0]
@@ -250,18 +217,6 @@ def mensagem_da_dlq():
         return morta
     except Exception as exc:  # noqa: BLE001
         print(f"  ..    leitura da DLQ falhou: {exc}")
-        return None
-
-
-def fila_mensagens(nome):
-    """Lê a contagem de mensagens de uma fila pela Management API do RabbitMQ."""
-    url = f"{RABBITMQ_API}/api/queues/%2F/{nome}"
-    requisicao = urllib.request.Request(url, headers={"Authorization": _basic()})
-    try:
-        with urllib.request.urlopen(requisicao, timeout=15) as resposta:
-            return json.loads(resposta.read())
-    except Exception as exc:  # noqa: BLE001
-        print(f"  ..    Management API indisponivel: {exc}")
         return None
 
 
@@ -283,15 +238,15 @@ def republicar_rabbitmq(evento):
         "payload": json.dumps(evento.to_dict(), ensure_ascii=False),
         "payload_encoding": "string",
     }
-    requisicao = urllib.request.Request(
-        url,
-        data=json.dumps(corpo).encode(),
-        headers={"Content-Type": "application/json", "Authorization": _basic()},
-        method="POST",
-    )
     try:
-        with urllib.request.urlopen(requisicao, timeout=15) as resposta:
-            return json.loads(resposta.read()).get("routed") is True
+        resposta = management(
+            url,
+            RABBITMQ_USER,
+            RABBITMQ_PASSWORD,
+            metodo="POST",
+            dados=corpo,
+        )
+        return (resposta or {}).get("routed") is True
     except Exception as exc:  # noqa: BLE001
         print(f"  ..    republicação falhou: {exc}")
         return False
@@ -330,26 +285,15 @@ def republicar(pedido_criado, pedido_lido):
 
 def contar_mortas():
     """Quantas mensagens estão na DLQ. No Kafka, o total do tópico."""
-    if BROKER == "kafka":
-        from confluent_kafka import Consumer, TopicPartition
-
-        consumidor = Consumer({"bootstrap.servers": KAFKA_SERVERS, "group.id": "smoke-contagem"})
-        try:
-            metadata = consumidor.list_topics(TOPICO_DLQ, timeout=15)
-            if TOPICO_DLQ not in metadata.topics:
-                return 0
-            total = 0
-            for particao in metadata.topics[TOPICO_DLQ].partitions:
-                topo = TopicPartition(TOPICO_DLQ, particao)
-                inicio, fim = consumidor.get_watermark_offsets(topo, timeout=10, cached=False)
-                total += max(fim - inicio, 0)
-            return total
-        except Exception as exc:  # noqa: BLE001
-            print(f"  ..    contagem da DLQ falhou: {exc}")
-            return None
-        finally:
-            consumidor.close()
-    return (fila_mensagens(DLQ) or {}).get("messages")
+    return contar_mortas_dlq(
+        BROKER,
+        kafka_servers=KAFKA_SERVERS,
+        topico=TOPICO_DLQ,
+        fila=DLQ,
+        rabbit_api=RABBITMQ_API,
+        usuario=RABBITMQ_USER,
+        senha=RABBITMQ_PASSWORD,
+    )
 
 
 def ler_morta():
@@ -360,21 +304,19 @@ def ler_morta():
     return (mensagem_da_dlq() or {}).get("payload")
 
 
-print(f"== Smoke test da mensageria assíncrona (broker: {BROKER}) ==")
-
-status, _ = _req("GET", "/health")
+status, _, _ = pedir("GET", "/health")
 check("health publico (200)", status == 200, f"-> {status}")
 
-status, payload = _req("POST", "/api/v1/auth/token/", ADMIN)
+status, payload, _ = pedir("POST", "/api/v1/auth/token/", ADMIN)
 check("login admin (200)", status == 200 and "access" in (payload or {}), f"-> {status}")
 token = (payload or {}).get("access", "")
 
-status, payload = _req("POST", "/api/v1/auth/token/", USER)
+status, payload, _ = pedir("POST", "/api/v1/auth/token/", USER)
 check("login user (200)", status == 200 and "access" in (payload or {}), f"-> {status}")
 token_user = (payload or {}).get("access", "")
 
 # --- dados exclusivos deste teste -------------------------------------------
-status, payload = _req(
+status, payload, _ = pedir(
     "POST",
     "/api/v1/categories/",
     {"name": f"Cat Mensageria {MARCA}", "description": f"Smoke test broker {BROKER}"},
@@ -383,7 +325,7 @@ status, payload = _req(
 check("criar categoria de teste (201)", status == 201, f"-> {status}")
 categoria_id = (payload or {}).get("id")
 
-status, payload = _req(
+status, payload, _ = pedir(
     "POST",
     "/api/v1/items/",
     {
@@ -397,10 +339,10 @@ check("criar item de teste (201)", status == 201, f"-> {status}")
 item_id = (payload or {}).get("id")
 
 # --- produtor ---------------------------------------------------------------
-status, payload = _req("POST", "/api/v1/pedidos/", {"itens": []}, token)
+status, payload, _ = pedir("POST", "/api/v1/pedidos/", {"itens": []}, token)
 check("pedido sem itens recusado (400)", status == 400, f"-> {status}")
 
-status, payload = _req(
+status, payload, _ = pedir(
     "POST",
     "/api/v1/pedidos/",
     {"itens": [{"item_id": 99999999, "quantidade": 1}]},
@@ -408,7 +350,7 @@ status, payload = _req(
 )
 check("item inexistente recusado (400)", status == 400, f"-> {status}")
 
-status, payload = _req(
+status, payload, _ = pedir(
     "POST",
     "/api/v1/pedidos/",
     {"itens": [{"item_id": item_id, "quantidade": 1}, {"item_id": item_id, "quantidade": 2}]},
@@ -416,10 +358,10 @@ status, payload = _req(
 )
 check("item repetido recusado (400)", status == 400, f"-> {status}")
 
-status, payload = _req("POST", "/api/v1/pedidos/", {"itens": [{"item_id": item_id, "quantidade": 1}]})
+status, payload, _ = pedir("POST", "/api/v1/pedidos/", {"itens": [{"item_id": item_id, "quantidade": 1}]})
 check("pedido sem token recusado (401)", status == 401, f"-> {status}")
 
-status, pedido = _req(
+status, pedido, _ = pedir(
     "POST",
     "/api/v1/pedidos/",
     {"idempotency_key": CHAVE_OK, "itens": [{"item_id": item_id, "quantidade": 2}]},
@@ -463,7 +405,7 @@ check(
 )
 
 # --- idempotencia no produtor ----------------------------------------------
-status, repetido = _req(
+status, repetido, _ = pedir(
     "POST",
     "/api/v1/pedidos/",
     {"idempotency_key": CHAVE_OK, "itens": [{"item_id": item_id, "quantidade": 2}]},
@@ -485,7 +427,7 @@ check(
     f"-> {publicado}",
 )
 time.sleep(4)
-_, payload_reentrega = _req("GET", f"/api/v1/pedidos/{pedido_id}/", token=token_user)
+_, payload_reentrega, _ = pedir("GET", f"/api/v1/pedidos/{pedido_id}/", token=token_user)
 check(
     "reentrega nao altera o pedido (segue PROCESSANDO)",
     (payload_reentrega or {}).get("status") == "PROCESSANDO",
@@ -525,7 +467,7 @@ if BROKER == "kafka":
     distintas = []
     for indice in range(PARTICOES):
         chave = f"pedido-part-{MARCA}-{indice}"
-        status, _ = _req(
+        status, _, _ = pedir(
             "POST",
             "/api/v1/pedidos/",
             {
@@ -569,7 +511,7 @@ print(
     f"PEDIDO_WORKER_FALHA_IDEM_KEYS={CHAVE_DLQ[:-len(MARCA)]}*"
 )
 antes = contar_mortas()
-status, pedido_dlq = _req(
+status, pedido_dlq, _ = pedir(
     "POST",
     "/api/v1/pedidos/",
     {"idempotency_key": CHAVE_DLQ, "itens": [{"item_id": item_id, "quantidade": 1}]},
@@ -602,7 +544,7 @@ if nova_na_dlq:
         morta.get("idempotency_key") == CHAVE_DLQ,
         f"-> idempotency_key={morta.get('idempotency_key')}",
     )
-    _, lido = _req("GET", f"/api/v1/pedidos/{pedido_dlq.get('id')}/", token=token_user)
+    _, lido, _ = pedir("GET", f"/api/v1/pedidos/{pedido_dlq.get('id')}/", token=token_user)
     check(
         "pedido da DLQ nao teve o efeito aplicado (segue PENDENTE)",
         (lido or {}).get("status") == "PENDENTE",
@@ -623,8 +565,8 @@ else:
 # DELETE é barrado por integridade referencial. Apagar o pedido para liberar o
 # item destruiria o histórico que o próprio smoke acabou de verificar, então a
 # limpeza tenta, e reporta o que sobrou em vez de afirmar que removeu tudo.
-status_item, _ = _req("DELETE", f"/api/v1/items/{item_id}/", token=token)
-status_categoria, _ = _req("DELETE", f"/api/v1/categories/{categoria_id}/", token=token)
+status_item, _, _ = pedir("DELETE", f"/api/v1/items/{item_id}/", token=token)
+status_categoria, _, _ = pedir("DELETE", f"/api/v1/categories/{categoria_id}/", token=token)
 removidos = []
 preservados = []
 if status_item in (200, 204):
@@ -639,5 +581,4 @@ print(f"  ..    removidos: {', '.join(removidos) or 'nada'}")
 if preservados:
     print(f"  ..    preservados por integridade referencial: {'; '.join(preservados)}")
 
-print(f"\n== Resultado: {passed} PASS / {failed} FAIL / {skipped} SKIP ==")
-sys.exit(1 if failed else 0)
+sys.exit(relatorio.resultado())
