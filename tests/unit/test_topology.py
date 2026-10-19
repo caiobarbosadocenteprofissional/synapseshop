@@ -61,7 +61,11 @@ def test_topologia_de_evento_desconhecido_levanta_erro():
 
 @pytest.mark.parametrize(
     ("id_registro", "prefixo", "esperado"),
-    [(15, "pagamento", "pagamento:15"), (42, "notificacao", "notificacao:42")],
+    [
+        (15, "pagamento", "pagamento:15"),
+        (42, "notificacao", "notificacao:42"),
+        (1, "pedido", "pedido:1"),
+    ],
 )
 def test_chave_de(id_registro, prefixo, esperado):
     assert topology.chave_de(id_registro, prefixo) == esperado

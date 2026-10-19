@@ -272,3 +272,9 @@ def test_notificacao_campo_texto_vazio(campo):
 
 def test_agora_termina_com_z():
     assert c._agora().endswith("Z")
+
+
+def test_texto_de_decimal_e_int_usa_representacao_estavel():
+    assert c._texto(Decimal("10.50")) == "10.50"
+    assert c._texto(Decimal("0")) == "0"
+    assert c._texto(5) == "5"
