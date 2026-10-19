@@ -6,11 +6,32 @@ from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+
+def env_bool(nome: str, padrao: bool = False) -> bool:
+    """Lê uma variavel booleana aceitando 1/true/yes, sem diferenciar caixa."""
+    valor = os.environ.get(nome)
+    if valor is None:
+        return padrao
+    return valor.strip().lower() in ("1", "true", "yes")
+
+
+def env_int(nome: str, padrao: int) -> int:
+    return int(os.environ.get(nome, str(padrao)))
+
+
+def env_float(nome: str, padrao: float) -> float:
+    return float(os.environ.get(nome, str(padrao)))
+
+
+def env_list(nome: str) -> list[str]:
+    """Lista separada por virgulas, sem itens vazios (ganchos de teste)."""
+    return [item.strip() for item in os.environ.get(nome, "").split(",") if item.strip()]
+
 SECRET_KEY = os.environ.get(
     "DJANGO_SECRET_KEY", "dev-insecure-synapseshop-change-me"
 )
 
-DEBUG = os.environ.get("DJANGO_DEBUG", "true").lower() in ("1", "true", "yes")
+DEBUG = env_bool("DJANGO_DEBUG", True)
 
 ALLOWED_HOSTS = ["*"]
 
@@ -70,17 +91,13 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # O Compose provisiona o serviço `redis` e injeta REDIS_URL; `CACHE_ENABLED`
 # permite desligar o cache sem mexer no código (A/B de desempenho).
 # IGNORE_EXCEPTIONS mantém a API no PostgreSQL quando o Redis estiver fora do ar.
-CACHE_ENABLED = os.environ.get("CACHE_ENABLED", "true").lower() in (
-    "1",
-    "true",
-    "yes",
-)
-CACHE_TTL_LISTA = int(os.environ.get("CACHE_TTL_LISTA", "60"))
-CACHE_TTL_DETALHE = int(os.environ.get("CACHE_TTL_DETALHE", "300"))
+CACHE_ENABLED = env_bool("CACHE_ENABLED", True)
+CACHE_TTL_LISTA = env_int("CACHE_TTL_LISTA", 60)
+CACHE_TTL_DETALHE = env_int("CACHE_TTL_DETALHE", 300)
 # Aula 11: o detalhe do pedido também é cacheado. O TTL é curto porque o
 # pedido muda de estado por eventos de outros processos (pagamento, notificação)
 # e a invalidação, embora exista, nunca é uma transação com a gravação.
-CACHE_TTL_PEDIDO = int(os.environ.get("CACHE_TTL_PEDIDO", "60"))
+CACHE_TTL_PEDIDO = env_int("CACHE_TTL_PEDIDO", 60)
 
 if CACHE_ENABLED:
     CACHES = {
@@ -136,10 +153,10 @@ REST_FRAMEWORK = {
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(
-        minutes=int(os.environ.get("JWT_ACCESS_TOKEN_MINUTES", "60"))
+        minutes=env_int("JWT_ACCESS_TOKEN_MINUTES", 60)
     ),
     "REFRESH_TOKEN_LIFETIME": timedelta(
-        days=int(os.environ.get("JWT_REFRESH_TOKEN_DAYS", "7"))
+        days=env_int("JWT_REFRESH_TOKEN_DAYS", 7)
     ),
     "ALGORITHM": "HS256",
     "SIGNING_KEY": SECRET_KEY,
@@ -155,11 +172,7 @@ SIMPLE_JWT = {
 # é lido pela API (produtor) e pelo `pedido-worker` (consumidor).
 # MESSAGERIA_ENABLED é o kill-switch: com `false` o pedido é gravado e nenhum
 # evento é publicado, o que permite medir o custo da sincronia ponta a ponta.
-MESSAGERIA_ENABLED = os.environ.get("MESSAGERIA_ENABLED", "true").lower() in (
-    "1",
-    "true",
-    "yes",
-)
+MESSAGERIA_ENABLED = env_bool("MESSAGERIA_ENABLED", True)
 
 # Aula 10: broker da Camada 5. `kafka` é o padrão; `rabbitmq` mantém o caminho
 # da Aula 9 disponível para comparação (mesma API em `services/messaging.py`).
@@ -170,7 +183,7 @@ if MENSAGERIA_BROKER not in ("kafka", "rabbitmq"):
     )
 
 RABBITMQ_HOST = os.environ.get("RABBITMQ_HOST", "rabbitmq")
-RABBITMQ_PORT = int(os.environ.get("RABBITMQ_PORT", "5672"))
+RABBITMQ_PORT = env_int("RABBITMQ_PORT", 5672)
 RABBITMQ_USER = os.environ.get("RABBITMQ_USER", "guest")
 RABBITMQ_PASSWORD = os.environ.get("RABBITMQ_PASSWORD", "guest")
 RABBITMQ_VHOST = os.environ.get("RABBITMQ_VHOST", "/")
@@ -185,7 +198,7 @@ RABBITMQ_DLX = os.environ.get("RABBITMQ_DLX", "pedidos.dlx")
 RABBITMQ_ROUTING_KEY_PEDIDO_CRIADO = os.environ.get(
     "RABBITMQ_ROUTING_KEY_PEDIDO_CRIADO", "pedido.criado"
 )
-RABBITMQ_PREFETCH = int(os.environ.get("RABBITMQ_PREFETCH", "1"))
+RABBITMQ_PREFETCH = env_int("RABBITMQ_PREFETCH", 1)
 
 # Aula 11: a Aula 10 deixou a topologia do Kafka fixa em `PedidoCriado`. Com o
 # fluxo completo (pedido ➔ pagamento ➔ notificação) cada evento tem o seu
@@ -225,11 +238,11 @@ KAFKA_TOPICO_PEDIDO_CRIADO_DLQ = os.environ.get(
 )
 # Partições são a unidade de paralelismo: o número de consumidores úteis nunca
 # supera o número de partições do tópico.
-KAFKA_PARTICOES = int(os.environ.get("KAFKA_PARTICOES", "3"))
-KAFKA_REPLICAS = int(os.environ.get("KAFKA_REPLICAS", "1"))
+KAFKA_PARTICOES = env_int("KAFKA_PARTICOES", 3)
+KAFKA_REPLICAS = env_int("KAFKA_REPLICAS", 1)
 # Retenção configurável: o ganho do log em relação a uma fila é justamente poder
 # manter o histórico e reprocessar a partir de um offset.
-KAFKA_RETENTION_MS = int(os.environ.get("KAFKA_RETENTION_MS", str(7 * 24 * 3600 * 1000)))
+KAFKA_RETENTION_MS = env_int("KAFKA_RETENTION_MS", 7 * 24 * 3600 * 1000)
 KAFKA_CLEANUP_POLICY = os.environ.get("KAFKA_CLEANUP_POLICY", "delete")
 KAFKA_GRUPO_CONSUMIDORES = os.environ.get("KAFKA_GRUPO_CONSUMIDORES", "pedido-worker")
 # `earliest` reprocessa o log retido a partir do início quando o grupo é novo;
@@ -239,12 +252,12 @@ KAFKA_AUTO_OFFSET_RESET = os.environ.get("KAFKA_AUTO_OFFSET_RESET", "earliest")
 # `all` espera a confirmação de todas as réplicas: com réplicas = 1 em
 # desenvolvimento, equivale a esperar o líder, e não perde evento em troca.
 KAFKA_PRODUCER_ACKS = os.environ.get("KAFKA_PRODUCER_ACKS", "all")
-KAFKA_PRODUCER_LINGER_MS = int(os.environ.get("KAFKA_PRODUCER_LINGER_MS", "5"))
-KAFKA_POLL_TIMEOUT_S = float(os.environ.get("KAFKA_POLL_TIMEOUT_S", "1.0"))
-KAFKA_SESSION_TIMEOUT_MS = int(os.environ.get("KAFKA_SESSION_TIMEOUT_MS", "10000"))
+KAFKA_PRODUCER_LINGER_MS = env_int("KAFKA_PRODUCER_LINGER_MS", 5)
+KAFKA_POLL_TIMEOUT_S = env_float("KAFKA_POLL_TIMEOUT_S", 1.0)
+KAFKA_SESSION_TIMEOUT_MS = env_int("KAFKA_SESSION_TIMEOUT_MS", 10000)
 # Teto entre dois `poll()` do consumidor: um handler lento acima deste limite
 # expulsa o consumidor do grupo e força um rebalanceamento.
-KAFKA_MAX_POLL_INTERVAL_MS = int(os.environ.get("KAFKA_MAX_POLL_INTERVAL_MS", "300000"))
+KAFKA_MAX_POLL_INTERVAL_MS = env_int("KAFKA_MAX_POLL_INTERVAL_MS", 300000)
 
 # Aula 11: topologia dos eventos novos do fluxo. O padrão dos nomes segue a
 # convenção `<dominio>.<evento em minusculas, sem separador>` e o da DLQ é
@@ -269,15 +282,15 @@ KAFKA_GRUPO_NOTIFICACAO = os.environ.get("KAFKA_GRUPO_NOTIFICACAO", "notificacao
 # Política de reentrega do consumidor: attempts = 1 + MAX_RETRIES. Depois de
 # esgotar as tentativas a mensagem é morta: no RabbitMQ por `nack` sem requeue
 # (a dead-letter exchange encaminha), no Kafka por publicação no tópico da DLQ.
-MENSAGERIA_MAX_RETRIES = int(os.environ.get("MESSAGERIA_MAX_RETRIES", "3"))
-MENSAGERIA_BACKOFF_BASE_MS = int(os.environ.get("MENSAGERIA_BACKOFF_BASE_MS", "250"))
-MENSAGERIA_BACKOFF_MAX_MS = int(os.environ.get("MENSAGERIA_BACKOFF_MAX_MS", "5000"))
+MENSAGERIA_MAX_RETRIES = env_int("MESSAGERIA_MAX_RETRIES", 3)
+MENSAGERIA_BACKOFF_BASE_MS = env_int("MENSAGERIA_BACKOFF_BASE_MS", 250)
+MENSAGERIA_BACKOFF_MAX_MS = env_int("MENSAGERIA_BACKOFF_MAX_MS", 5000)
 
 # Aula 11 (observabilidade): um consumidor sem tráfego é o caso mais difícil de
 # diagnosticar — não há log por mensagem e a única evidência de vida é a subida.
 # A cada `MENSAGERIA_HEARTBEAT_S` sem receber nada, o consumidor registra um
 # batimento. 0 desliga o log (não o consumidor).
-MENSAGERIA_HEARTBEAT_S = int(os.environ.get("MENSAGERIA_HEARTBEAT_S", "60"))
+MENSAGERIA_HEARTBEAT_S = env_int("MENSAGERIA_HEARTBEAT_S", 60)
 
 # Aula 14: camada de Inteligência Artificial — `llm_service` (Camada 4 da
 # arquitetura-alvo). A API fala com um provedor de LLM compatível com a API de
@@ -290,18 +303,18 @@ LLM_MODEL = os.environ.get("LLM_MODEL", "gpt-4o-mini")
 # Timeout por tentativa (≤5s): o assistente não pode prender a requisição mais do
 # que o usuário tolera esperar; sem timeout, uma queda do provedor vira um worker
 # do Gunicorn ocupado indefinidamente.
-LLM_TIMEOUT_S = float(os.environ.get("LLM_TIMEOUT_S", "5"))
+LLM_TIMEOUT_S = env_float("LLM_TIMEOUT_S", 5)
 # Retry com backoff exponencial + jitter (1 tentativa inicial + N retentativas).
-LLM_MAX_TENTATIVAS = int(os.environ.get("LLM_MAX_TENTATIVAS", "3"))
-LLM_BACKOFF_BASE_MS = int(os.environ.get("LLM_BACKOFF_BASE_MS", "250"))
-LLM_BACKOFF_MAX_MS = int(os.environ.get("LLM_BACKOFF_MAX_MS", "5000"))
+LLM_MAX_TENTATIVAS = env_int("LLM_MAX_TENTATIVAS", 3)
+LLM_BACKOFF_BASE_MS = env_int("LLM_BACKOFF_BASE_MS", 250)
+LLM_BACKOFF_MAX_MS = env_int("LLM_BACKOFF_MAX_MS", 5000)
 # Circuit breaker: falhas consecutivas que abrem o circuito e o tempo de repouso
 # antes de permitir uma tentativa de prova (half-open).
-LLM_CIRCUITO_LIMITE_FALHAS = int(os.environ.get("LLM_CIRCUITO_LIMITE_FALHAS", "3"))
-LLM_CIRCUITO_RESET_SEGUNDOS = int(os.environ.get("LLM_CIRCUITO_RESET_SEGUNDOS", "30"))
+LLM_CIRCUITO_LIMITE_FALHAS = env_int("LLM_CIRCUITO_LIMITE_FALHAS", 3)
+LLM_CIRCUITO_RESET_SEGUNDOS = env_int("LLM_CIRCUITO_RESET_SEGUNDOS", 30)
 # Limite duro de `max_tokens` aceito no payload: o cliente pede, o servidor limita
 # — é o teto de custo por chamada.
-LLM_MAX_TOKENS_LIMITE = int(os.environ.get("LLM_MAX_TOKENS_LIMITE", "1024"))
+LLM_MAX_TOKENS_LIMITE = env_int("LLM_MAX_TOKENS_LIMITE", 1024)
 # Estimativa de custo por chamada (preço por 1M de tokens). Configurável por
 # modelo; 0 quando não há preço conhecido (a telemetria ainda conta tokens).
 LLM_PRECO_PROMPT_USD_MILHAO = float(
@@ -312,24 +325,16 @@ LLM_PRECO_OUTPUT_USD_MILHAO = float(
 )
 
 # Prazo de validade da chave de deduplicação (idempotência do consumidor).
-IDEMPOTENCIA_TTL_SEGUNDOS = int(os.environ.get("IDEMPOTENCIA_TTL_SEGUNDOS", "86400"))
+IDEMPOTENCIA_TTL_SEGUNDOS = env_int("IDEMPOTENCIA_TTL_SEGUNDOS", 86400)
 
 # Ganchos de teste para simular erro forçado e validar reentrega + DLQ sem
 # alterar o código: padrões (fnmatch) de idempotency_key que o worker rejeita.
 # Vazio em operação normal. Ex.: PEDIDO_WORKER_FALHA_IDEM_KEYS=pedido-dlq-*
-PEDIDO_WORKER_FALHA_IDEM_KEYS = [
-    padrao.strip()
-    for padrao in os.environ.get("PEDIDO_WORKER_FALHA_IDEM_KEYS", "").split(",")
-    if padrao.strip()
-]
+PEDIDO_WORKER_FALHA_IDEM_KEYS = env_list("PEDIDO_WORKER_FALHA_IDEM_KEYS")
 
 # Aula 11: mesmo gancho para o notificacao-worker, com o objetivo de validar o
 # retry e a DLQ **no segundo elo** do fluxo (pagamento ➔ notificação).
-NOTIFICACAO_WORKER_FALHA_IDEM_KEYS = [
-    padrao.strip()
-    for padrao in os.environ.get("NOTIFICACAO_WORKER_FALHA_IDEM_KEYS", "").split(",")
-    if padrao.strip()
-]
+NOTIFICACAO_WORKER_FALHA_IDEM_KEYS = env_list("NOTIFICACAO_WORKER_FALHA_IDEM_KEYS")
 
 # Aula 8: logs estruturados (JSON) do ciclo de vida do cache e dos eventos de
 # domínio. As mensagens já são JSON em services/, por isso o formatador é
