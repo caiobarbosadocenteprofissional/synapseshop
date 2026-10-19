@@ -301,8 +301,6 @@ def republicar_rabbitmq(evento):
 
 
 def republicar(pedido_criado, pedido_lido):
-    """Republica o evento no broker ativo. Devolve ``True`` se foi aceito."""
-def republicar(pedido_criado, pedido_lido):
     """Republica o evento no broker ativo. Devolve ``True`` se foi aceito.
 
     O evento e remontado a partir do estado já persistido, com a mesma

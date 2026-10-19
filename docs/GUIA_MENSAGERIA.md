@@ -20,7 +20,7 @@ estão em [`docs/DECISOES_TECNICAS_AULA10.md`](DECISOES_TECNICAS_AULA10.md).
 ## Topologia do Kafka
 
 ```
-   POST /api/v1/pedidos/ â”€â”€â–¶-key: idempotency_keyâ”€â–¶â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+   POST /api/v1/pedidos/ ──▶ key: idempotency_key ──▶ ┌───────────────────────┐
                                                    │  pedidos.pedidocriado │
                                                    │  3 partições          │
                                                    │  retenção 7 dias      │
