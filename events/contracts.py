@@ -40,7 +40,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict, List, Tuple
+from typing import Any, ClassVar, Dict, List, Tuple
 
 EVENTO_PEDIDO_CRIADO = "PedidoCriado"
 EVENTO_PAGAMENTO_PROCESSADO = "PagamentoProcessado"
@@ -171,6 +171,50 @@ def _texto_do_campo(dados: Dict[str, Any], campo: str) -> str:
     return valor
 
 
+def _envelope_comum(bruto: Dict[str, Any]) -> Dict[str, Any]:
+    """Campos do envelope que todo ``from_dict`` devolve para o construtor."""
+    return {
+        "idempotency_key": str(bruto["idempotency_key"]).strip(),
+        "event_id": str(bruto["event_id"]),
+        "occurred_at": str(bruto["occurred_at"]),
+        "correlation_id": str(bruto.get("correlation_id") or bruto["event_id"]),
+    }
+
+
+@dataclass(frozen=True, kw_only=True)
+class _Evento:
+    """Envelope comum: campos fixos e serialização dirigida por ``_CAMPOS_DADOS``."""
+
+    idempotency_key: str
+    event_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    event_type: str = ""
+    version: str = VERSAO_CONTRATO
+    occurred_at: str = field(default_factory=_agora)
+    correlation_id: str = ""
+
+    _CAMPOS_DADOS: ClassVar[Tuple[str, ...]] = ()
+    _CAMPOS_TEXTO: ClassVar[Tuple[str, ...]] = ()
+    _CAMPOS_LISTA: ClassVar[Tuple[str, ...]] = ()
+
+    def to_dict(self) -> Dict[str, Any]:
+        dados: Dict[str, Any] = {}
+        for campo in self._CAMPOS_DADOS:
+            valor = getattr(self, campo)
+            if campo in self._CAMPOS_TEXTO:
+                valor = _texto(valor)
+            elif campo in self._CAMPOS_LISTA:
+                valor = [item.to_dict() for item in valor]
+            dados[campo] = valor
+        return _serializar_envelope(
+            tipo=self.event_type,
+            chave=self.idempotency_key,
+            dados=dados,
+            event_id=self.event_id,
+            occurred_at=self.occurred_at,
+            correlation_id=self.correlation_id,
+        )
+
+
 @dataclass(frozen=True)
 class ItemPedidoCriado:
     item_id: int
@@ -202,37 +246,20 @@ class ItemPedidoCriado:
         return item
 
 
-@dataclass(frozen=True)
-class EventoPedidoCriado:
+@dataclass(frozen=True, kw_only=True)
+class EventoPedidoCriado(_Evento):
     """Envelope completo do evento ``PedidoCriado``."""
 
-    idempotency_key: str
     pedido_id: int
     usuario_id: int
     total: Decimal
     status: str
     itens: List[ItemPedidoCriado] = field(default_factory=list)
-    event_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     event_type: str = EVENTO_PEDIDO_CRIADO
-    version: str = VERSAO_CONTRATO
-    occurred_at: str = field(default_factory=_agora)
-    correlation_id: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
-        return _serializar_envelope(
-            tipo=self.event_type,
-            chave=self.idempotency_key,
-            dados={
-                "pedido_id": self.pedido_id,
-                "usuario_id": self.usuario_id,
-                "total": _texto(self.total),
-                "status": self.status,
-                "itens": [item.to_dict() for item in self.itens],
-            },
-            event_id=self.event_id,
-            occurred_at=self.occurred_at,
-            correlation_id=self.correlation_id,
-        )
+    _CAMPOS_DADOS = ("pedido_id", "usuario_id", "total", "status", "itens")
+    _CAMPOS_TEXTO = ("total",)
+    _CAMPOS_LISTA = ("itens",)
 
     @classmethod
     def from_dict(cls, bruto: Dict[str, Any]) -> "EventoPedidoCriado":
@@ -243,20 +270,17 @@ class EventoPedidoCriado:
             raise ContratoInvalido("pedido sem itens")
 
         return cls(
-            idempotency_key=str(bruto["idempotency_key"]).strip(),
+            **_envelope_comum(bruto),
             pedido_id=_inteiro(dados, "pedido_id"),
             usuario_id=_inteiro(dados, "usuario_id"),
             total=_decimal(dados, "total"),
             status=str(dados["status"]),
             itens=itens,
-            event_id=str(bruto["event_id"]),
-            occurred_at=str(bruto["occurred_at"]),
-            correlation_id=str(bruto.get("correlation_id") or bruto["event_id"]),
         )
 
 
-@dataclass(frozen=True)
-class EventoPagamentoProcessado:
+@dataclass(frozen=True, kw_only=True)
+class EventoPagamentoProcessado(_Evento):
     """Envelope do evento ``PagamentoProcessado`` (Aula 11).
 
     Os dois desfechos do pagamento — aprovado e recusado — viajam no **mesmo**
@@ -269,7 +293,6 @@ class EventoPagamentoProcessado:
     pedido são entradas diferentes e não se anulam.
     """
 
-    idempotency_key: str
     pagamento_id: int
     pedido_id: int
     usuario_id: int
@@ -277,33 +300,22 @@ class EventoPagamentoProcessado:
     status: str
     forma_pagamento: str
     referencia: str
-    event_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     event_type: str = EVENTO_PAGAMENTO_PROCESSADO
-    version: str = VERSAO_CONTRATO
-    occurred_at: str = field(default_factory=_agora)
-    correlation_id: str = ""
+
+    _CAMPOS_DADOS = (
+        "pagamento_id",
+        "pedido_id",
+        "usuario_id",
+        "valor",
+        "status",
+        "forma_pagamento",
+        "referencia",
+    )
+    _CAMPOS_TEXTO = ("valor",)
 
     @property
     def aprovado(self) -> bool:
         return self.status == "APROVADO"
-
-    def to_dict(self) -> Dict[str, Any]:
-        return _serializar_envelope(
-            tipo=self.event_type,
-            chave=self.idempotency_key,
-            dados={
-                "pagamento_id": self.pagamento_id,
-                "pedido_id": self.pedido_id,
-                "usuario_id": self.usuario_id,
-                "valor": _texto(self.valor),
-                "status": self.status,
-                "forma_pagamento": self.forma_pagamento,
-                "referencia": self.referencia,
-            },
-            event_id=self.event_id,
-            occurred_at=self.occurred_at,
-            correlation_id=self.correlation_id,
-        )
 
     @classmethod
     def from_dict(cls, bruto: Dict[str, Any]) -> "EventoPagamentoProcessado":
@@ -313,7 +325,7 @@ class EventoPagamentoProcessado:
             raise ContratoInvalido(f"status de pagamento desconhecido: {status!r}")
 
         return cls(
-            idempotency_key=str(bruto["idempotency_key"]).strip(),
+            **_envelope_comum(bruto),
             pagamento_id=_inteiro(dados, "pagamento_id"),
             pedido_id=_inteiro(dados, "pedido_id"),
             usuario_id=_inteiro(dados, "usuario_id"),
@@ -321,14 +333,11 @@ class EventoPagamentoProcessado:
             status=status,
             forma_pagamento=_texto_do_campo(dados, "forma_pagamento"),
             referencia=_texto_do_campo(dados, "referencia"),
-            event_id=str(bruto["event_id"]),
-            occurred_at=str(bruto["occurred_at"]),
-            correlation_id=str(bruto.get("correlation_id") or bruto["event_id"]),
         )
 
 
-@dataclass(frozen=True)
-class EventoNotificacaoEnviada:
+@dataclass(frozen=True, kw_only=True)
+class EventoNotificacaoEnviada(_Evento):
     """Envelope do evento ``NotificacaoEnviada`` (Aula 11).
 
     Fecha a cadeia ``Pedido ➔ Pagamento ➔ Notificação`` e é publicado **pelo
@@ -338,48 +347,32 @@ class EventoNotificacaoEnviada:
     registro e de quem foi avisado.
     """
 
-    idempotency_key: str
     notificacao_id: int
     pedido_id: int
     pagamento_id: int
     canal: str
     destinatario: str
     assunto: str
-    event_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     event_type: str = EVENTO_NOTIFICACAO_ENVIADA
-    version: str = VERSAO_CONTRATO
-    occurred_at: str = field(default_factory=_agora)
-    correlation_id: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
-        return _serializar_envelope(
-            tipo=self.event_type,
-            chave=self.idempotency_key,
-            dados={
-                "notificacao_id": self.notificacao_id,
-                "pedido_id": self.pedido_id,
-                "pagamento_id": self.pagamento_id,
-                "canal": self.canal,
-                "destinatario": self.destinatario,
-                "assunto": self.assunto,
-            },
-            event_id=self.event_id,
-            occurred_at=self.occurred_at,
-            correlation_id=self.correlation_id,
-        )
+    _CAMPOS_DADOS = (
+        "notificacao_id",
+        "pedido_id",
+        "pagamento_id",
+        "canal",
+        "destinatario",
+        "assunto",
+    )
 
     @classmethod
     def from_dict(cls, bruto: Dict[str, Any]) -> "EventoNotificacaoEnviada":
         dados = _validar_envelope(bruto, EVENTO_NOTIFICACAO_ENVIADA)
         return cls(
-            idempotency_key=str(bruto["idempotency_key"]).strip(),
+            **_envelope_comum(bruto),
             notificacao_id=_inteiro(dados, "notificacao_id"),
             pedido_id=_inteiro(dados, "pedido_id"),
             pagamento_id=_inteiro(dados, "pagamento_id"),
             canal=_texto_do_campo(dados, "canal"),
             destinatario=_texto_do_campo(dados, "destinatario"),
             assunto=_texto_do_campo(dados, "assunto"),
-            event_id=str(bruto["event_id"]),
-            occurred_at=str(bruto["occurred_at"]),
-            correlation_id=str(bruto.get("correlation_id") or bruto["event_id"]),
         )
