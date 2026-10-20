@@ -145,6 +145,32 @@ def contar_mortas_dlq(
         return None
 
 
+def limpar_catalogo(item_id, categoria_id, token):
+    """Tenta remover item e categoria, relatando o que ficou preso por FK."""
+    status_item = pedir("DELETE", f"/api/v1/items/{item_id}/", token=token)[0]
+    status_categoria = pedir(
+        "DELETE", f"/api/v1/categories/{categoria_id}/", token=token
+    )[0]
+    removidos = []
+    preservados = []
+    if status_item in (200, 204):
+        removidos.append("item")
+    else:
+        preservados.append(
+            f"item {item_id} (status {status_item}: preso em PedidoItem)"
+        )
+    if status_categoria in (200, 204):
+        removidos.append("categoria")
+    else:
+        preservados.append(f"categoria {categoria_id} (status {status_categoria})")
+    print(f"  ..    removidos: {', '.join(removidos) or 'nada'}")
+    if preservados:
+        print(
+            "  ..    preservados por integridade referencial: "
+            f"{'; '.join(preservados)}"
+        )
+
+
 class Relatorio:
     """Contadores e saída padronizada de PASS/FAIL/SKIP dos smoke tests."""
 
