@@ -15,7 +15,7 @@ omit =
     config/settings_test.py
     config/asgi.py
     config/wsgi.py
-    services/messaging_kafka.py
+    services/messaging_kafka/*
     services/messaging_rabbit.py
 
 [report]
