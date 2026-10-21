@@ -8,7 +8,6 @@ e o import abaixo resolve.
 
 import base64
 import json
-import sys
 import time
 import urllib.error
 import urllib.request

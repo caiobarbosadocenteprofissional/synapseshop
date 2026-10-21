@@ -30,3 +30,26 @@ jobs:
 
       - name: Configuracao do Django
         run: python manage.py check
+
+  testes-inventario:
+    name: Testes do microsservico de inventario
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      # O servico e um deployavel separado, com dependencias proprias: por isso
+      # a suite roda em um job a parte, e nao junto da suite do Django.
+      - name: Dependencias
+        run: |
+          pip install -r inventory/requirements.txt
+          pip install pytest
+
+      - name: Suite do inventario
+        run: python -m pytest inventory/tests

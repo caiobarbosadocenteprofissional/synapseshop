@@ -44,7 +44,7 @@ CACHES = {
 
 # Nenhum evento é publicado durante os testes por padrão; os cenários de
 # publicação substituem explicitamente o produtor por um fake.
-MESSAGERIA_ENABLED = False
+MENSAGERIA_ENABLED = False
 
 # Hashing de senha rápido: o login é exercitado em vários testes de integração.
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]

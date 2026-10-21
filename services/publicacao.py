@@ -46,14 +46,14 @@ def publicar_evento(
 
     ``False`` significa uma de três coisas, todas registradas em log com a mesma
     chave ``<prefixo>.publicacao_ignorada`` ou ``<prefixo>.publicacao_falhou``:
-    a mensageria está desligada por ``MESSAGERIA_ENABLED``, o broker recusou, ou a
+    a mensageria está desligada por ``MENSAGERIA_ENABLED``, o broker recusou, ou a
     publicação excedeu o tempo de confirmação.
     """
-    if not settings.MESSAGERIA_ENABLED:
+    if not settings.MENSAGERIA_ENABLED:
         _log(
             f"{prefixo_log}.publicacao_ignorada",
             idempotency_key=idempotency_key,
-            motivo="MESSAGERIA_ENABLED=false",
+            motivo="MENSAGERIA_ENABLED=false",
             **(extra or {}),
         )
         return False

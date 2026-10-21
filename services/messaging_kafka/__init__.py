@@ -49,7 +49,6 @@ from django.conf import settings
 
 from events.topology import TopologiaEvento
 from services.messaging_base import (
-    HEADER_ERRO,
     HEADER_TENTATIVA,
     MensageriaIndisponivel,
     _log,

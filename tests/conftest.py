@@ -279,7 +279,7 @@ class ProdutorEventoIndisponivel:
 @pytest.fixture
 def broker_disponivel(monkeypatch, settings):
     """Liga a mensageria e troca o produtor por um fake em memória."""
-    settings.MESSAGERIA_ENABLED = True
+    settings.MENSAGERIA_ENABLED = True
     FakeProdutorEvento.publicados = []
     monkeypatch.setattr("services.publicacao.ProdutorEvento", FakeProdutorEvento)
     return FakeProdutorEvento.publicados
@@ -288,7 +288,7 @@ def broker_disponivel(monkeypatch, settings):
 @pytest.fixture
 def broker_indisponivel(monkeypatch, settings):
     """Liga a mensageria e faz toda publicação falhar (broker fora do ar)."""
-    settings.MESSAGERIA_ENABLED = True
+    settings.MENSAGERIA_ENABLED = True
     monkeypatch.setattr(
         "services.publicacao.ProdutorEvento", ProdutorEventoIndisponivel
     )

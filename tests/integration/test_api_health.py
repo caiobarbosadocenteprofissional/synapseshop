@@ -20,7 +20,7 @@ def test_health_pronto_200_com_dependencias_ok(client, db):
 
 
 def test_health_pronto_503_com_broker_fora(client, db, monkeypatch, settings):
-    settings.MESSAGERIA_ENABLED = True
+    settings.MENSAGERIA_ENABLED = True
     monkeypatch.setattr(
         health, "_verificar_broker", lambda: {"ok": False, "broker": "kafka"}
     )

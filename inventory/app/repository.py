@@ -17,6 +17,12 @@ from sqlalchemy.orm import Session
 
 from app.models import InventoryItem
 
+# Campos que a atualização parcial pode tocar. A whitelist existe para que um
+# `setattr` arbitrário não vire escrita em coluna que o chamador não deveria
+# alcançar — e para que `None` (ausência no PATCH) nunca alcance uma coluna
+# `NOT NULL`.
+CAMPOS_ATUALIZAVEIS = ("sku", "name", "quantity")
+
 
 class InventoryRepository:
     """Abstrai o acesso transacional à tabela `inventory_items`."""
@@ -49,6 +55,8 @@ class InventoryRepository:
         if item is None:
             return None
         for field, value in changes.items():
+            if field not in CAMPOS_ATUALIZAVEIS or value is None:
+                continue
             setattr(item, field, value)
         self._commit()
         self._session.refresh(item)

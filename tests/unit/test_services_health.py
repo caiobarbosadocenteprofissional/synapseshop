@@ -99,11 +99,11 @@ def test_verificar_agrega_tudo_pronto(db):
     relatorio = health.verificar()
     assert relatorio["pronto"] is True
     assert relatorio["status"] == "ok"
-    assert relatorio["dependencias"]["broker"]["observacao"] == "MESSAGERIA_ENABLED=false"
+    assert relatorio["dependencias"]["broker"]["observacao"] == "MENSAGERIA_ENABLED=false"
 
 
 def test_verificar_broker_habilitado_e_fora_do_ar(db, settings, monkeypatch):
-    settings.MESSAGERIA_ENABLED = True
+    settings.MENSAGERIA_ENABLED = True
     monkeypatch.setattr(
         health, "_verificar_broker", lambda: {"ok": False, "broker": "kafka"}
     )

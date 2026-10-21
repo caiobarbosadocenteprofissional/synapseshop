@@ -47,7 +47,14 @@ class InventoryService:
     def update_item(
         self, item_id: int, payload: InventoryItemUpdate
     ) -> Optional[InventoryItem]:
-        changes = payload.model_dump(exclude_unset=True)
+        # `exclude_unset` tira o que não veio no corpo; o filtro de `None` tira
+        # o que veio explícito como nulo. No PATCH, `null` significa "não
+        # alterar" — nunca "gravar NULL" numa coluna `NOT NULL`.
+        changes = {
+            campo: valor
+            for campo, valor in payload.model_dump(exclude_unset=True).items()
+            if valor is not None
+        }
         if "sku" in changes:
             existing = self._repository.get_item_by_sku(changes["sku"])
             if existing is not None and existing.id != item_id:

@@ -1,3 +1,4 @@
+import logging
 import os
 from datetime import timedelta
 from pathlib import Path
@@ -6,26 +7,51 @@ from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+logger = logging.getLogger("synapseshop.config")
 
-def env_bool(nome: str, padrao: bool = False) -> bool:
-    """Lê uma variavel booleana aceitando 1/true/yes, sem diferenciar caixa."""
+
+def _bruto(nome: str, nome_obsoleto: str | None, padrao: str) -> str:
+    """Valor bruto da variável, com fallback para o nome obsoleto.
+
+    A família da mensageria teve duas grafias (``MESSAGERIA_*`` em inglês e
+    ``MENSAGERIA_*`` em português). A grafia em português é a canônica; a
+    inglesa continua sendo lida para que o ``.env`` de quem já tinha não
+    pare de funcionar — com um aviso, para que a migração não passe
+    despercebida.
+    """
     valor = os.environ.get(nome)
-    if valor is None:
-        return padrao
+    if valor is not None:
+        return valor
+    if nome_obsoleto:
+        valor_obsoleto = os.environ.get(nome_obsoleto)
+        if valor_obsoleto is not None:
+            logger.warning(
+                "variavel_depreciada nome=%s substituta=%s",
+                nome_obsoleto,
+                nome,
+            )
+            return valor_obsoleto
+    return padrao
+
+
+def env_bool(nome: str, padrao: bool = False, *, obsoleto: str | None = None) -> bool:
+    """Lê uma variavel booleana aceitando 1/true/yes, sem diferenciar caixa."""
+    valor = _bruto(nome, obsoleto, "true" if padrao else "false")
     return valor.strip().lower() in ("1", "true", "yes")
 
 
-def env_int(nome: str, padrao: int) -> int:
-    return int(os.environ.get(nome, str(padrao)))
+def env_int(nome: str, padrao: int, *, obsoleto: str | None = None) -> int:
+    return int(_bruto(nome, obsoleto, str(padrao)))
 
 
-def env_float(nome: str, padrao: float) -> float:
-    return float(os.environ.get(nome, str(padrao)))
+def env_float(nome: str, padrao: float, *, obsoleto: str | None = None) -> float:
+    return float(_bruto(nome, obsoleto, str(padrao)))
 
 
-def env_list(nome: str) -> list[str]:
+def env_list(nome: str, *, obsoleto: str | None = None) -> list[str]:
     """Lista separada por virgulas, sem itens vazios (ganchos de teste)."""
-    return [item.strip() for item in os.environ.get(nome, "").split(",") if item.strip()]
+    bruto = _bruto(nome, obsoleto, "")
+    return [item.strip() for item in bruto.split(",") if item.strip()]
 
 SECRET_KEY = os.environ.get(
     "DJANGO_SECRET_KEY", "dev-insecure-synapseshop-change-me"
@@ -170,9 +196,10 @@ SIMPLE_JWT = {
 # Aula 9: mensageria assíncrona com RabbitMQ (Camada 5 — Dados & Mensageria).
 # O Compose provisiona o serviço `rabbitmq` e injeta RABBITMQ_*; o mesmo bloco
 # é lido pela API (produtor) e pelo `pedido-worker` (consumidor).
-# MESSAGERIA_ENABLED é o kill-switch: com `false` o pedido é gravado e nenhum
+# MENSAGERIA_ENABLED é o kill-switch: com `false` o pedido é gravado e nenhum
 # evento é publicado, o que permite medir o custo da sincronia ponta a ponta.
-MESSAGERIA_ENABLED = env_bool("MESSAGERIA_ENABLED", True)
+# `MESSAGERIA_ENABLED` (grafia antiga, em inglês) ainda é lida, com aviso.
+MENSAGERIA_ENABLED = env_bool("MENSAGERIA_ENABLED", True, obsoleto="MESSAGERIA_ENABLED")
 
 # Aula 10: broker da Camada 5. `kafka` é o padrão; `rabbitmq` mantém o caminho
 # da Aula 9 disponível para comparação (mesma API em `services/messaging.py`).
@@ -282,7 +309,9 @@ KAFKA_GRUPO_NOTIFICACAO = os.environ.get("KAFKA_GRUPO_NOTIFICACAO", "notificacao
 # Política de reentrega do consumidor: attempts = 1 + MAX_RETRIES. Depois de
 # esgotar as tentativas a mensagem é morta: no RabbitMQ por `nack` sem requeue
 # (a dead-letter exchange encaminha), no Kafka por publicação no tópico da DLQ.
-MENSAGERIA_MAX_RETRIES = env_int("MESSAGERIA_MAX_RETRIES", 3)
+MENSAGERIA_MAX_RETRIES = env_int(
+    "MENSAGERIA_MAX_RETRIES", 3, obsoleto="MESSAGERIA_MAX_RETRIES"
+)
 MENSAGERIA_BACKOFF_BASE_MS = env_int("MENSAGERIA_BACKOFF_BASE_MS", 250)
 MENSAGERIA_BACKOFF_MAX_MS = env_int("MENSAGERIA_BACKOFF_MAX_MS", 5000)
 

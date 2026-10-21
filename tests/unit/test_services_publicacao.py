@@ -19,7 +19,7 @@ def _argumentos():
 
 
 def test_mensageria_desligada_retorna_false(settings):
-    settings.MESSAGERIA_ENABLED = False
+    settings.MENSAGERIA_ENABLED = False
     assert publicacao.publicar_evento(**_argumentos()) is False
 
 

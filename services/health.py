@@ -122,10 +122,10 @@ def verificar() -> Dict[str, Any]:
     }
     # Mensageria desligada por configuração não é falha de prontidão: sem broker
     # a API ainda atende o catálogo e a leitura de pedidos.
-    if settings.MESSAGERIA_ENABLED:
+    if settings.MENSAGERIA_ENABLED:
         dependencias["broker"] = _verificar_broker()
     else:
-        dependencias["broker"] = {"ok": True, "observacao": "MESSAGERIA_ENABLED=false"}
+        dependencias["broker"] = {"ok": True, "observacao": "MENSAGERIA_ENABLED=false"}
 
     fora: List[str] = [nome for nome, estado in dependencias.items() if not estado.get("ok")]
     pronto = not fora
@@ -135,7 +135,7 @@ def verificar() -> Dict[str, Any]:
         "status": "ok" if pronto else "degradado",
         "pronto": pronto,
         "broker_selecionado": settings.MENSAGERIA_BROKER,
-        "mensageria_habilitada": bool(settings.MESSAGERIA_ENABLED),
+        "mensageria_habilitada": bool(settings.MENSAGERIA_ENABLED),
         "cache_habilitado": bool(getattr(settings, "CACHE_ENABLED", False)),
         "dependencias": dependencias,
         "fora_do_ar": fora,

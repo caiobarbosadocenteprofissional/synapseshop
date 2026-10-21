@@ -13,6 +13,7 @@ import urllib.error
 import pytest
 
 from services import llm, prompts
+from services.llm import transporte
 
 pytestmark = pytest.mark.unit
 
@@ -45,7 +46,7 @@ def _erro_http(codigo):
 # --------------------------------------------------------------------------- #
 def test_http_429_vira_taxa_limitada(monkeypatch):
     monkeypatch.setattr(
-        llm.urllib.request, "urlopen", lambda *a, **k: (_ for _ in ()).throw(_erro_http(429))
+        transporte.urllib.request, "urlopen", lambda *a, **k: (_ for _ in ()).throw(_erro_http(429))
     )
     with pytest.raises(llm.LLMTaxaLimitada):
         llm._http_post_json("http://x", {}, {}, 1)
@@ -53,7 +54,7 @@ def test_http_429_vira_taxa_limitada(monkeypatch):
 
 def test_http_500_vira_indisponivel(monkeypatch):
     monkeypatch.setattr(
-        llm.urllib.request, "urlopen", lambda *a, **k: (_ for _ in ()).throw(_erro_http(503))
+        transporte.urllib.request, "urlopen", lambda *a, **k: (_ for _ in ()).throw(_erro_http(503))
     )
     with pytest.raises(llm.LLMIndisponivel):
         llm._http_post_json("http://x", {}, {}, 1)
@@ -61,7 +62,7 @@ def test_http_500_vira_indisponivel(monkeypatch):
 
 def test_http_400_vira_payload_invalido(monkeypatch):
     monkeypatch.setattr(
-        llm.urllib.request, "urlopen", lambda *a, **k: (_ for _ in ()).throw(_erro_http(400))
+        transporte.urllib.request, "urlopen", lambda *a, **k: (_ for _ in ()).throw(_erro_http(400))
     )
     with pytest.raises(llm.LLMPayloadInvalido):
         llm._http_post_json("http://x", {}, {}, 1)
@@ -71,7 +72,7 @@ def test_url_error_de_timeout_vira_llm_timeout(monkeypatch):
     def falhar(*a, **k):
         raise urllib.error.URLError(socket.timeout("tempo esgotado"))
 
-    monkeypatch.setattr(llm.urllib.request, "urlopen", falhar)
+    monkeypatch.setattr(transporte.urllib.request, "urlopen", falhar)
     with pytest.raises(llm.LLMTimeout):
         llm._http_post_json("http://x", {}, {}, 1)
 
@@ -80,14 +81,14 @@ def test_url_error_de_rede_vira_indisponivel(monkeypatch):
     def falhar(*a, **k):
         raise urllib.error.URLError("host desconhecido")
 
-    monkeypatch.setattr(llm.urllib.request, "urlopen", falhar)
+    monkeypatch.setattr(transporte.urllib.request, "urlopen", falhar)
     with pytest.raises(llm.LLMIndisponivel):
         llm._http_post_json("http://x", {}, {}, 1)
 
 
 def test_timeout_direto_vira_llm_timeout(monkeypatch):
     monkeypatch.setattr(
-        llm.urllib.request, "urlopen", lambda *a, **k: (_ for _ in ()).throw(TimeoutError())
+        transporte.urllib.request, "urlopen", lambda *a, **k: (_ for _ in ()).throw(TimeoutError())
     )
     with pytest.raises(llm.LLMTimeout):
         llm._http_post_json("http://x", {}, {}, 1)
@@ -95,7 +96,7 @@ def test_timeout_direto_vira_llm_timeout(monkeypatch):
 
 def test_os_error_vira_indisponivel(monkeypatch):
     monkeypatch.setattr(
-        llm.urllib.request,
+        transporte.urllib.request,
         "urlopen",
         lambda *a, **k: (_ for _ in ()).throw(OSError("conexao recusada")),
     )
@@ -114,7 +115,7 @@ def test_http_sucesso_parseia_json(monkeypatch):
         def read(self):
             return b'{"choices": []}'
 
-    monkeypatch.setattr(llm.urllib.request, "urlopen", lambda *a, **k: RespostaFalsa())
+    monkeypatch.setattr(transporte.urllib.request, "urlopen", lambda *a, **k: RespostaFalsa())
     assert llm._http_post_json("http://x", {}, {}, 1) == {"choices": []}
 
 

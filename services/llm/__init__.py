@@ -14,7 +14,6 @@ superfície a menos para atualizar.
 import logging
 import random
 import time
-import urllib.request
 from typing import Any, Dict, List, Optional, Tuple
 
 from django.conf import settings

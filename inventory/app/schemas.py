@@ -28,6 +28,7 @@ class InventoryItem(BaseModel):
     name: str
     quantity: int = Field(ge=0, description="Quantidade em estoque (não negativa).")
     created_at: datetime
+    updated_at: datetime
 
 
 class InventoryItemCreate(BaseModel):
@@ -39,7 +40,11 @@ class InventoryItemCreate(BaseModel):
 
 
 class InventoryItemUpdate(BaseModel):
-    """Payload de atualização parcial de um item de inventário."""
+    """Payload de atualização parcial de um item de inventário.
+
+    Todo campo é opcional e `None` significa **não alterar** — um `null` no
+    corpo não pode chegar ao banco, onde as colunas são `NOT NULL`.
+    """
 
     sku: Optional[str] = Field(
         default=None, min_length=1, max_length=50, description="Código único do item (SKU)."
@@ -47,7 +52,9 @@ class InventoryItemUpdate(BaseModel):
     name: Optional[str] = Field(
         default=None, min_length=1, max_length=100, description="Nome do item."
     )
-    quantity: int = Field(default=None, ge=0, description="Quantidade em estoque.")
+    quantity: Optional[int] = Field(
+        default=None, ge=0, description="Quantidade em estoque."
+    )
 
 
 class StockAdjustRequest(BaseModel):
