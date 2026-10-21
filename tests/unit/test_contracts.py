@@ -10,6 +10,7 @@ from decimal import Decimal
 import pytest
 
 from events import contracts as c
+from events import contratos_base as cb
 
 pytestmark = pytest.mark.unit
 
@@ -99,7 +100,7 @@ def test_correlation_id_ausente_cai_no_event_id():
 
 
 def test_serializar_envelope_correlation_vazia_usa_event_id():
-    envelope = c._serializar_envelope(
+    envelope = cb._serializar_envelope(
         tipo="X", chave="k", dados={}, event_id="eid", occurred_at="agora", correlation_id=""
     )
     assert envelope["correlation_id"] == "eid"
@@ -271,10 +272,10 @@ def test_notificacao_campo_texto_vazio(campo):
 
 
 def test_agora_termina_com_z():
-    assert c._agora().endswith("Z")
+    assert cb._agora().endswith("Z")
 
 
 def test_texto_de_decimal_e_int_usa_representacao_estavel():
-    assert c._texto(Decimal("10.50")) == "10.50"
-    assert c._texto(Decimal("0")) == "0"
-    assert c._texto(5) == "5"
+    assert cb._texto(Decimal("10.50")) == "10.50"
+    assert cb._texto(Decimal("0")) == "0"
+    assert cb._texto(5) == "5"

@@ -17,6 +17,7 @@ omit =
     config/wsgi.py
     services/messaging_kafka/*
     services/messaging_rabbit.py
+    services/messaging_rabbit_infra.py
 
 [report]
 # Meta da equipe (ver README/Aula 12): 85% global. O relatório `term-missing`
