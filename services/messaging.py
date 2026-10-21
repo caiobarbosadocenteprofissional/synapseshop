@@ -21,10 +21,11 @@ continuaria falando com o broker antigo — sem nenhum aviso. Resolvendo na
 chamada, a decisão segue a configuração do momento.
 
 A Aula 11 aplica a mesma ideia ao **evento**: o par produtor/consumidor deixou de
-ser ``...PedidoCriado`` e passou a receber a topologia do evento
-(``events/topology.py``), então publicar um pagamento ou notificar uma
-notificação é o mesmo código com outra topologia. ``pedido-worker`` e
-``notificacao-worker`` são a mesma classe com handlers diferentes.
+ser ``...PedidoCriado`` e passou a receber a topologia do evento (o formato em
+``events/topology.py``, os nomes resolvidos em ``config/topologias.py``), então
+publicar um pagamento ou notificar uma notificação é o mesmo código com outra
+topologia. ``pedido-worker`` e ``notificacao-worker`` são a mesma classe com
+handlers diferentes.
 
 A topologia não é exportada de propósito: ``declarar_topologia`` tem assinatura
 diferente em cada transporte (o AMQP recebe o canal, o Kafka usa o
@@ -36,7 +37,7 @@ O contrato em ``events/contracts.py`` e a regra de deduplicação em
 formato da mensagem nem a chave de idempotência.
 """
 
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured

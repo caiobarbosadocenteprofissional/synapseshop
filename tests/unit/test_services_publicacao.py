@@ -3,7 +3,7 @@
 import pytest
 
 from events.contracts import EVENTO_PEDIDO_CRIADO
-from events.topology import topologia_de
+from config.topologias import topologia_de
 from services import publicacao
 
 pytestmark = pytest.mark.unit

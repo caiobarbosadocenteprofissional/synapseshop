@@ -1,4 +1,4 @@
-﻿"""Integração: liveness e readiness (``/health`` e ``/health/pronto``)."""
+"""Integração: liveness e readiness (``/health`` e ``/health/pronto``)."""
 
 import pytest
 

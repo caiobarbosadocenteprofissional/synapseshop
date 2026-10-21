@@ -28,19 +28,17 @@ from typing import Any, Dict, Tuple
 
 from django.db import IntegrityError, transaction
 
+from config.topologias import topologia_de
 from events.contracts import EventoNotificacaoEnviada, EventoPagamentoProcessado
-from events.topology import chave_de, topologia_de
+from events.topology import chave_de
 from repositories.models import Notificacao, Pagamento, Pedido
 from services import idempotencia
 from services.events import NOTIFICACAO_REGISTRADA, emitir_apos_commit
-from services.log_estruturado import log_evento
+from services.log_estruturado import LoggerEstruturado
 from services.publicacao import publicar_evento
 
 logger = logging.getLogger("synapseshop.notificacao")
-
-
-def _log(nome_evento: str, **campos: Any) -> None:
-    log_evento(logger, nome_evento, **campos)
+log = LoggerEstruturado(logger)
 
 
 class PagamentoInexistente(RuntimeError):
@@ -142,7 +140,7 @@ def processar_pagamento_processado(bruto: Dict[str, Any], tentativa: int = 0) ->
     inicio = time.perf_counter()
 
     if idempotencia.ja_processado(evento.event_type, evento.idempotency_key):
-        _log(
+        log(
             "worker.notificacao.duplicado",
             event_type=evento.event_type,
             correlation_id=evento.correlation_id,
@@ -173,7 +171,7 @@ def processar_pagamento_processado(bruto: Dict[str, Any], tentativa: int = 0) ->
         if not evento.aprovado:
             # Caminho negativo: nenhum registro e nenhum evento. O log existe
             # para que a ausência de notificação seja um desfecho observável.
-            _log(
+            log(
                 "worker.notificacao.recusada",
                 event_type=evento.event_type,
                 correlation_id=evento.correlation_id,
@@ -197,7 +195,7 @@ def processar_pagamento_processado(bruto: Dict[str, Any], tentativa: int = 0) ->
     duracao_ms = round((time.perf_counter() - inicio) * 1000, 3)
     idempotencia.registrar(evento.event_type, evento.idempotency_key, duracao_ms=duracao_ms)
     publicado = publicar_notificacao_enviada(notificacao)
-    _log(
+    log(
         "worker.notificacao.processada",
         event_type=evento.event_type,
         correlation_id=evento.correlation_id,

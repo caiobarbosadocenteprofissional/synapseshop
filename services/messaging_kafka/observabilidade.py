@@ -1,5 +1,6 @@
 """Métricas de consumo: tempo de fila e batimento do consumidor ocioso."""
 
+import logging
 import time
 from typing import List, Optional
 
@@ -7,7 +8,10 @@ from confluent_kafka import Message
 from django.conf import settings
 
 from events.topology import TopologiaEvento
-from services.messaging_base import _log
+from services.log_estruturado import LoggerEstruturado
+
+logger = logging.getLogger("synapseshop.mensageria")
+log = LoggerEstruturado(logger)
 
 
 def tempo_de_fila(msg: Message) -> Optional[float]:
@@ -47,7 +51,7 @@ def registrar_ociosidade(
     if silencio < settings.MENSAGERIA_HEARTBEAT_S:
         return ultimo_evento
     agora = time.monotonic()
-    _log(
+    log(
         "mensageria.consumidor.ocioso",
         topico=topologia.topico,
         grupo=topologia.grupo,

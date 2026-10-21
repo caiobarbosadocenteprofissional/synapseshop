@@ -1,4 +1,4 @@
-﻿"""Testes do cache-aside (``services.cache``).
+"""Testes do cache-aside (``services.cache``).
 
 Cobrem o ciclo miss ➔ preenchimento ➔ hit, o caminho de ausência, o *kill-switch*
 de bypass e a invalidação. O Redis é substituído por um ``FakeRedis`` sempre que

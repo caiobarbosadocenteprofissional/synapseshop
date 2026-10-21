@@ -37,9 +37,10 @@ from django.conf import settings
 from django.core.cache import cache
 from django_redis import get_redis_connection
 
-from services.log_estruturado import log_evento
+from services.log_estruturado import LoggerEstruturado
 
 logger = logging.getLogger("synapseshop.cache")
+log = LoggerEstruturado(logger)
 
 # Nomenclatura de chaves de cache (Aula 8).
 PREFIXO_LISTA_ITENS = "itens:list"
@@ -133,8 +134,7 @@ def _texto(chave) -> str:
 
 
 def _log_lookup(endpoint: str, chave: str, resultado: str, ttl: int, origem: str) -> None:
-    log_evento(
-        logger,
+    log(
         "cache.lookup",
         endpoint=endpoint,
         chave=chave,

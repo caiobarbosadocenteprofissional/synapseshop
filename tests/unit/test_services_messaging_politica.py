@@ -53,7 +53,7 @@ def eventos(monkeypatch):
     registros = []
     monkeypatch.setattr(
         messaging_base,
-        "_log",
+        "log",
         lambda nome, **campos: registros.append((nome, campos)),
     )
     return registros

@@ -1,11 +1,17 @@
 """Declaração idempotente dos tópicos e DLQs do Kafka."""
 
+import logging
+
 from confluent_kafka import KafkaError, KafkaException
 from confluent_kafka.admin import AdminClient, NewTopic
 from django.conf import settings
 
-from events.topology import topologias
-from services.messaging_base import MensageriaIndisponivel, _log
+from config.topologias import topologias
+from services.log_estruturado import LoggerEstruturado
+from services.messaging_base import MensageriaIndisponivel
+
+logger = logging.getLogger("synapseshop.mensageria")
+log = LoggerEstruturado(logger)
 
 
 def _erro_do_broker(exc: Exception) -> str:
@@ -61,7 +67,7 @@ def declarar_topologia() -> None:
     for nome, futuro in cliente.create_topics(topicos, request_timeout=15).items():
         try:
             futuro.result()
-            _log(
+            log(
                 "kafka.topico.criado",
                 topico=nome,
                 particoes=particoes_por_topico.get(nome),

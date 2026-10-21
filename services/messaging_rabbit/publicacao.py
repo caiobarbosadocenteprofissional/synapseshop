@@ -1,5 +1,6 @@
 """Publicação AMQP na exchange de eventos."""
 
+import logging
 import time
 import uuid
 from typing import Any, Dict, Optional
@@ -7,14 +8,17 @@ from typing import Any, Dict, Optional
 import pika
 
 from events.topology import TopologiaEvento
+from services.log_estruturado import LoggerEstruturado
 from services.messaging_base import (
     HEADER_TENTATIVA,
     MensageriaIndisponivel,
     ResultadoPublicacao,
-    _log,
     serializar_evento,
 )
 from services.messaging_rabbit.topologia import conexao, declarar_topologia, fechar_recursos
+
+logger = logging.getLogger("synapseshop.mensageria")
+log = LoggerEstruturado(logger)
 
 
 class ProdutorEvento:
@@ -83,7 +87,7 @@ class ProdutorEvento:
         if confirmado is False:
             raise MensageriaIndisponivel("broker nao confirmou a publicacao")
 
-        _log(
+        log(
             "mensageria.publicado",
             event_type=evento.get("event_type"),
             idempotency_key=idempotency_key,

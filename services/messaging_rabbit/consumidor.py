@@ -1,19 +1,22 @@
 """Consumidor AMQP com *ack* manual, reentrega controlada e DLQ."""
 
+import logging
 import time
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict
 
 import pika
 from django.conf import settings
 
 from events.topology import TopologiaEvento
+from services.log_estruturado import LoggerEstruturado
 from services.messaging_base import (
-    MensageriaIndisponivel,
-    _log,
     ler_tentativa,
     processar_evento,
 )
 from services.messaging_rabbit.topologia import conexao, declarar_topologia, fechar_recursos
+
+logger = logging.getLogger("synapseshop.mensageria")
+log = LoggerEstruturado(logger)
 
 
 class ConsumidorEvento:
@@ -61,7 +64,7 @@ class ConsumidorEvento:
                     on_message_callback=self._ao_receber,
                     auto_ack=False,
                 )
-                _log(
+                log(
                     "mensageria.consumidor.iniciado",
                     fila=self._topologia.fila,
                     prefetch=settings.RABBITMQ_PREFETCH,
@@ -75,9 +78,9 @@ class ConsumidorEvento:
                 # Ctrl+C tem de encerrar o worker: sem marcar a parada, o laço
                 # voltaria a consumir e o processo nunca sairia.
                 self._parado = True
-                _log("mensageria.consumidor.interrompido")
+                log("mensageria.consumidor.interrompido")
             except Exception as exc:  # noqa: BLE001 - reconecta com backoff
-                _log("mensageria.consumidor.falha", erro=str(exc))
+                log("mensageria.consumidor.falha", erro=str(exc))
                 time.sleep(2)
             finally:
                 self._fechar_recursos()

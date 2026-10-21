@@ -1,4 +1,4 @@
-﻿"""Testes dos contratos de mensagem — caminho felizes e de erro.
+"""Testes dos contratos de mensagem — caminho felizes e de erro.
 
 O contrato é o que impede o consumidor de aplicar um evento corrompido. Cada
 regra de validação de ``_validar_envelope`` tem um caso aqui.

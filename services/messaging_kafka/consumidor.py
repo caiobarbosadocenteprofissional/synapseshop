@@ -1,5 +1,6 @@
 """Consumidor Kafka com offset manual, reentrega controlada e DLQ."""
 
+import logging
 import time
 import uuid
 from typing import Any, Callable, Dict, List, Optional
@@ -8,8 +9,8 @@ from confluent_kafka import Consumer, KafkaError, KafkaException, Message
 from django.conf import settings
 
 from events.topology import TopologiaEvento
+from services.log_estruturado import LoggerEstruturado
 from services.messaging_base import (
-    _log,
     ler_tentativa,
     processar_evento,
 )
@@ -19,6 +20,9 @@ from services.messaging_kafka.observabilidade import (
 )
 from services.messaging_kafka.publicacao import publicar_retencao
 from services.messaging_kafka.topicos import _erro_do_broker, declarar_topologia
+
+logger = logging.getLogger("synapseshop.mensageria")
+log = LoggerEstruturado(logger)
 
 
 def _chave_de(evento) -> Optional[str]:
@@ -113,9 +117,9 @@ class ConsumidorEvento:
                 # Ctrl+C tem de encerrar o worker: sem marcar a parada, o laço
                 # voltaria a consumir e o processo nunca sairia.
                 self._parado = True
-                _log("mensageria.consumidor.interrompido")
+                log("mensageria.consumidor.interrompido")
             except Exception as exc:  # noqa: BLE001 - reconecta com backoff
-                _log(
+                log(
                     "mensageria.consumidor.falha",
                     erro=_erro_do_broker(exc),
                     broker="kafka",
@@ -146,7 +150,7 @@ class ConsumidorEvento:
 
     def _ao_atribuir(self, consumidor, particoes) -> None:
         self._particoes = [p.partition for p in particoes]
-        _log(
+        log(
             "kafka.consumidor.particoes",
             grupo=self._topologia.grupo,
             topico=self._topologia.topico,
@@ -156,7 +160,7 @@ class ConsumidorEvento:
         )
 
     def _ao_revogar(self, _consumidor, particoes) -> None:
-        _log(
+        log(
             "kafka.consumidor.rebalanceamento",
             grupo=self._topologia.grupo,
             topico=self._topologia.topico,
@@ -169,7 +173,7 @@ class ConsumidorEvento:
         try:
             self._consumidor.commit(message=msg, asynchronous=False)
         except Exception as exc:  # noqa: BLE001
-            _log("kafka.commit.falhou", erro=_erro_do_broker(exc), contexto=contexto)
+            log("kafka.commit.falhou", erro=_erro_do_broker(exc), contexto=contexto)
 
     def _ao_receber(self, msg: Message) -> None:
         cabecalhos = list(msg.headers() or [])

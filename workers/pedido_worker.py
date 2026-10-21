@@ -45,10 +45,10 @@ if BASE_DIR not in sys.path:
 
 from workers.comum import (  # noqa: E402  (bootstrap do Django e do sys.path)
     ErroForcadoDeTeste,
-    _log,
     destino_log,
     executar_worker,
     falha_forcada,
+    log,
 )
 
 from django.conf import settings  # noqa: E402
@@ -80,7 +80,7 @@ def processar_pedido_criado(bruto: Dict[str, Any], tentativa: int) -> None:
     inicio = time.perf_counter()
 
     if idempotencia.ja_processado(evento.event_type, evento.idempotency_key):
-        _log(
+        log(
             "worker.pedido.duplicado",
             event_type=evento.event_type,
             correlation_id=evento.correlation_id,
@@ -122,7 +122,7 @@ def processar_pedido_criado(bruto: Dict[str, Any], tentativa: int) -> None:
     idempotencia.registrar(
         evento.event_type, evento.idempotency_key, duracao_ms=duracao_ms
     )
-    _log(
+    log(
         "worker.pedido.processado",
         event_type=evento.event_type,
         correlation_id=evento.correlation_id,

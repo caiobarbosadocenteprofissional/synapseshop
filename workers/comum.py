@@ -25,16 +25,13 @@ django.setup()
 
 from django.conf import settings  # noqa: E402
 
-from events.topology import topologia_de  # noqa: E402
+from config.topologias import topologia_de  # noqa: E402
 from services import idempotencia  # noqa: E402
-from services.log_estruturado import log_evento  # noqa: E402
+from services.log_estruturado import LoggerEstruturado  # noqa: E402
 from services.messaging import consumidor_evento  # noqa: E402
 
 logger = logging.getLogger("synapseshop.worker")
-
-
-def _log(nome_evento: str, **campos: Any) -> None:
-    log_evento(logger, nome_evento, **campos)
+log = LoggerEstruturado(logger)
 
 
 class ErroForcadoDeTeste(RuntimeError):
@@ -86,7 +83,7 @@ def executar_worker(*, nome, evento, handler, client_id, falha_ativa) -> None:
     # As chaves de deduplicação têm prazo de validade: as expiradas são
     # descartadas na subida do worker para a tabela não crescer sem limite.
     expiradas = idempotencia.limpar_expirados()
-    _log(
+    log(
         "worker.iniciado",
         worker=nome,
         max_retries=settings.MENSAGERIA_MAX_RETRIES,
@@ -98,4 +95,4 @@ def executar_worker(*, nome, evento, handler, client_id, falha_ativa) -> None:
     try:
         consumidor.executar()
     finally:
-        _log("worker.encerrado", worker=nome)
+        log("worker.encerrado", worker=nome)

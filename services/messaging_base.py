@@ -27,9 +27,10 @@ from typing import Any, Callable, Dict, Optional, Protocol
 
 from django.conf import settings
 
-from services.log_estruturado import log_evento
+from services.log_estruturado import LoggerEstruturado
 
 logger = logging.getLogger("synapseshop.mensageria")
+log = LoggerEstruturado(logger)
 
 HEADER_TENTATIVA = "x-retry-count"
 HEADER_ERRO = "x-ultimo-erro"
@@ -106,10 +107,6 @@ Matar = Callable[[bytes, Optional[Dict[str, Any]], Dict[str, Any], str], bool]
 
 Campos = Callable[[], Dict[str, Any]]
 """Campos de log que só o transporte conhece (partição, offset, correlação)."""
-
-
-def _log(nome_evento: str, **campos: Any) -> None:
-    log_evento(logger, nome_evento, **campos)
 
 
 def _duracao_ms(inicio: float) -> float:
@@ -204,7 +201,7 @@ def processar_evento(
         return
 
     confirmar()
-    _log(
+    log(
         "mensageria.consumido",
         **{
             **campos(),
@@ -256,7 +253,7 @@ def _reentregar_ou_matar(
         # Sem confirmar a republicação, a original não é confirmada: ela volta
         # a ser entregue em vez de ser perdida. O transporte já a deixou onde
         # tinha de ficar (reenfileirada no AMQP, offset não commitado no Kafka).
-        _log(
+        log(
             "mensageria.reentrega.falhou",
             **{
                 **campos(),
@@ -269,7 +266,7 @@ def _reentregar_ou_matar(
         return
 
     confirmar()
-    _log(
+    log(
         "mensageria.reentrega",
         **{
             **campos(),
@@ -299,7 +296,7 @@ def _matar_para_dlq(
     if not matar(corpo, evento, cabecalhos, str(erro)):
         # A mensagem não chegou à DLQ: ela não é confirmada e volta a ser
         # entregue, para que a morte não vire perda.
-        _log(
+        log(
             "mensageria.dlq.falhou",
             **{
                 **campos(),
@@ -310,7 +307,7 @@ def _matar_para_dlq(
         )
         return
 
-    _log(
+    log(
         "mensageria.dlq",
         **{
             **campos(),

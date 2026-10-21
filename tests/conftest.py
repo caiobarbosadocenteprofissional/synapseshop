@@ -1,4 +1,4 @@
-﻿"""Fixtures globais da suíte (Aula 12).
+"""Fixtures globais da suíte (Aula 12).
 
 Concentra a infraestrutura de teste que os casos reutilizam:
 

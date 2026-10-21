@@ -29,19 +29,16 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from repositories.models import EventoProcessado
-from services.log_estruturado import log_evento
+from services.log_estruturado import LoggerEstruturado
 
 logger = logging.getLogger("synapseshop.idempotencia")
+log = LoggerEstruturado(logger)
 
 PREFIXO_CHAVE = "evento:processado"
 
 
 def _chave_cache(evento: str, idempotency_key: str) -> str:
     return f"{PREFIXO_CHAVE}:{evento}:{idempotency_key}"
-
-
-def _log(nome_evento: str, **campos) -> None:
-    log_evento(logger, nome_evento, **campos)
 
 
 def limpar_expirados() -> int:
@@ -74,7 +71,7 @@ def registrar(evento: str, idempotency_key: str, duracao_ms: Optional[float] = N
     ttl = settings.IDEMPOTENCIA_TTL_SEGUNDOS
     registrado = _registrar_postgresql(evento, idempotency_key, ttl)
     _registrar_cache(evento, idempotency_key, ttl)
-    _log(
+    log(
         "idempotencia.registrada",
         evento=evento,
         idempotency_key=idempotency_key,

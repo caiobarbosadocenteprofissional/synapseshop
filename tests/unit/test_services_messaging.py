@@ -9,7 +9,7 @@ import pytest
 from django.core.exceptions import ImproperlyConfigured
 
 from events.contracts import EVENTO_PEDIDO_CRIADO
-from events.topology import topologia_de
+from config.topologias import topologia_de
 from services import messaging
 from services.messaging_kafka import ConsumidorEvento as ConsumidorKafka
 from services.messaging_kafka import ProdutorEvento as ProdutorKafka

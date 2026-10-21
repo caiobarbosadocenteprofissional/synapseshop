@@ -16,20 +16,16 @@ from api.serializers import (
     PedidoSerializer,
 )
 from api.views.catalogo import resposta_com_cache
+from config.topologias import topologia_de
 from events.contracts import EventoPedidoCriado, ItemPedidoCriado
-from events.topology import topologia_de
 from repositories.models import Item, Notificacao, Pedido, PedidoItem, User
 from services import cache as cache_service
 from services import pagamento as pagamento_service
-from services.log_estruturado import log_evento
+from services.log_estruturado import LoggerEstruturado
 from services.publicacao import publicar_evento
 
 logger_pedidos = logging.getLogger("synapseshop.pedidos")
-
-
-def _log_pedido(nome_evento: str, **campos) -> None:
-    """Log estruturado do produtor, no mesmo formato dos logs da Aula 8."""
-    log_evento(logger_pedidos, nome_evento, **campos)
+log = LoggerEstruturado(logger_pedidos)
 
 
 class PedidoCreateView(APIView):
@@ -63,7 +59,7 @@ class PedidoCreateView(APIView):
         )
         existente = Pedido.objects.filter(idempotency_key=idempotency_key).first()
         if existente is not None:
-            _log_pedido(
+            log(
                 "pedido.duplicado",
                 idempotency_key=idempotency_key,
                 pedido_id=existente.pk,
@@ -118,7 +114,7 @@ class PedidoCreateView(APIView):
             return Response(PedidoSerializer(existente).data, status=200)
 
         itens_pedido = list(pedido.itens.all())
-        _log_pedido(
+        log(
             "pedido.criado",
             pedido_id=pedido.pk,
             usuario_id=pedido.usuario_id,
@@ -194,7 +190,7 @@ class PagamentoView(APIView):
             forma_pagamento=dados["forma_pagamento"],
         )
         if not criado:
-            _log_pedido(
+            log(
                 "pagamento.duplicado.resposta",
                 pedido_id=pedido.pk,
                 pagamento_id=pagamento.pk,

@@ -9,7 +9,7 @@ broker sem passar pelo consumidor).
 import pika
 from django.conf import settings
 
-from events.topology import topologias
+from config.topologias import topologias
 
 
 def conexao(client_id: str = "") -> pika.BlockingConnection:

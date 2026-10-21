@@ -32,10 +32,11 @@ from services.llm.erros import (
 from services.llm.redacao import redigir
 from services.llm.telemetria import _Telemetria
 from services.llm.transporte import _extrair, _http_post_json
-from services.log_estruturado import log_evento
+from services.log_estruturado import LoggerEstruturado
 from services.prompts import MODOS, montar_mensagens, normalizar_logs
 
 logger = logging.getLogger("synapseshop.ia")
+log = LoggerEstruturado(logger)
 
 _TELEMETRIA = _Telemetria()
 _CIRCUITO = CircuitBreaker()
@@ -56,10 +57,6 @@ def redefinir_circuito() -> Dict[str, Any]:
     """Fecha o circuito (usado entre testes e por ``POST /assist/stats/``)."""
     _CIRCUITO.registrar_sucesso()
     return _CIRCUITO.estado()
-
-
-def _log(nome_evento: str, **campos: Any) -> None:
-    log_evento(logger, nome_evento, **campos)
 
 
 def _requisitar(
@@ -120,7 +117,7 @@ def _chamar_com_resiliencia(
             if tentativa >= max_tentativas:
                 break
             espera = _espera_backoff(tentativa)
-            _log(
+            log(
                 "llm.reentrega",
                 tentativa=tentativa,
                 proxima_tentativa=tentativa + 1,
@@ -174,7 +171,7 @@ def assistir(
     except LLMErro as exc:
         latencia_ms = round((time.monotonic() - inicio) * 1000, 3)
         _TELEMETRIA.registrar_erro(tipo_erro=type(exc).__name__, latencia_ms=latencia_ms)
-        _log(
+        log(
             "llm.falha",
             modo=mode,
             erro=type(exc).__name__,
@@ -194,7 +191,7 @@ def assistir(
         tokens_output=tokens_output,
         custo_usd=custo,
     )
-    _log(
+    log(
         "llm.resposta",
         modo=mode,
         modelo=settings.LLM_MODEL,

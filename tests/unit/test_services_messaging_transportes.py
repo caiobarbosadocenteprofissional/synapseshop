@@ -17,7 +17,7 @@ O desfecho observado é o mesmo para os dois:
 import pytest
 
 from events.contracts import EVENTO_PEDIDO_CRIADO
-from events.topology import topologia_de
+from config.topologias import topologia_de
 from services.messaging_base import HEADER_ERRO, HEADER_TENTATIVA, serializar_evento
 from services.messaging_kafka.consumidor import ConsumidorEvento as ConsumidorKafka
 from services.messaging_rabbit.consumidor import ConsumidorEvento as ConsumidorAmqp

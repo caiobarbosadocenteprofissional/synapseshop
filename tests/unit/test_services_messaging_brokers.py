@@ -10,7 +10,7 @@ import pytest
 from confluent_kafka import KafkaError, KafkaException
 
 from events.contracts import EVENTO_PEDIDO_CRIADO
-from events.topology import topologia_de
+from config.topologias import topologia_de
 from services.messaging_base import (
     HEADER_ERRO,
     HEADER_TENTATIVA,

@@ -30,17 +30,15 @@ from typing import Tuple
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
+from config.topologias import topologia_de
 from events.contracts import EventoPagamentoProcessado
-from events.topology import chave_de, topologia_de
+from events.topology import chave_de
 from repositories.models import Pagamento, Pedido
 from services.events import PAGAMENTO_APROVADO, PAGAMENTO_RECUSADO, emitir_apos_commit
-from services.log_estruturado import log_evento
+from services.log_estruturado import LoggerEstruturado
 
 logger = logging.getLogger("synapseshop.pagamento")
-
-
-def _log(nome_evento: str, **campos) -> None:
-    log_evento(logger, nome_evento, **campos)
+log = LoggerEstruturado(logger)
 
 
 def _referencia_simulada() -> str:
@@ -69,7 +67,7 @@ def registrar_pagamento(
     """
     existente = Pagamento.objects.filter(pedido=pedido).first()
     if existente is not None:
-        _log(
+        log(
             "pagamento.duplicado",
             pedido_id=pedido.pk,
             pagamento_id=existente.pk,
@@ -107,7 +105,7 @@ def registrar_pagamento(
         vencedor = Pagamento.objects.filter(pedido=pedido).first()
         if vencedor is None:
             raise
-        _log(
+        log(
             "pagamento.conflito",
             pedido_id=pedido.pk,
             pagamento_id=vencedor.pk,
@@ -118,7 +116,7 @@ def registrar_pagamento(
         PAGAMENTO_APROVADO if status == Pagamento.Status.APROVADO else PAGAMENTO_RECUSADO,
         pedido_id=pedido.pk,
     )
-    _log(
+    log(
         "pagamento.registrado",
         pedido_id=pedido.pk,
         pagamento_id=pagamento.pk,

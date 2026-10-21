@@ -1,5 +1,6 @@
 """Publicação no Kafka: o produtor de eventos e a republicação com retenção."""
 
+import logging
 import json
 import time
 import uuid
@@ -9,14 +10,17 @@ from confluent_kafka import KafkaException, Producer
 from django.conf import settings
 
 from events.topology import TopologiaEvento
+from services.log_estruturado import LoggerEstruturado
 from services.messaging_base import (
     HEADER_TENTATIVA,
     MensageriaIndisponivel,
     ResultadoPublicacao,
-    _log,
     serializar_evento,
 )
 from services.messaging_kafka.topicos import _erro_do_broker, declarar_topologia
+
+logger = logging.getLogger("synapseshop.mensageria")
+log = LoggerEstruturado(logger)
 
 HEADER_EVENTO = "event_type"
 
@@ -133,7 +137,7 @@ class ProdutorEvento:
             )
 
         particao, offset = entrega[0]
-        _log(
+        log(
             "mensageria.publicado",
             event_type=evento.get("event_type"),
             idempotency_key=idempotency_key,
@@ -205,7 +209,7 @@ def publicar_retencao(
         )
         restantes = produtor.flush(10)
     except Exception as exc:  # noqa: BLE001
-        _log("kafka.republicacao.erro", topico=destino, erro=_erro_do_broker(exc))
+        log("kafka.republicacao.erro", topico=destino, erro=_erro_do_broker(exc))
         return None
     finally:
         try:
@@ -213,7 +217,7 @@ def publicar_retencao(
         except Exception:  # noqa: BLE001
             pass
     if erro:
-        _log("kafka.republicacao.erro", topico=destino, erro=_erro_do_broker(erro[0]))
+        log("kafka.republicacao.erro", topico=destino, erro=_erro_do_broker(erro[0]))
         return None
     if restantes or not entrega:
         return None

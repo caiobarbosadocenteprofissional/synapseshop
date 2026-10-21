@@ -23,14 +23,11 @@ from typing import Any, Dict, Optional
 from django.conf import settings
 
 from events.topology import TopologiaEvento
-from services.log_estruturado import log_evento
+from services.log_estruturado import LoggerEstruturado
 from services.messaging import MensageriaIndisponivel, produtor_evento
 
 logger = logging.getLogger("synapseshop.mensageria")
-
-
-def _log(nome_evento: str, **campos: Any) -> None:
-    log_evento(logger, nome_evento, **campos)
+log = LoggerEstruturado(logger)
 
 
 def publicar_evento(
@@ -50,7 +47,7 @@ def publicar_evento(
     publicação excedeu o tempo de confirmação.
     """
     if not settings.MENSAGERIA_ENABLED:
-        _log(
+        log(
             f"{prefixo_log}.publicacao_ignorada",
             idempotency_key=idempotency_key,
             motivo="MENSAGERIA_ENABLED=false",
@@ -63,7 +60,7 @@ def publicar_evento(
             produtor.publicar(evento, idempotency_key)
         return True
     except MensageriaIndisponivel as exc:
-        _log(
+        log(
             f"{prefixo_log}.publicacao_falhou",
             idempotency_key=idempotency_key,
             erro=str(exc),
