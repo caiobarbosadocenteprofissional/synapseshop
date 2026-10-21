@@ -7,7 +7,7 @@ cada um precisa do seu — mas a **decisão** de como cada evento é nomeado e r
 
 A tabela é lida de ``config/settings.py`` (nomes vêm de variáveis de ambiente,
 como já acontecia com o evento de pedido) e devolvida por :func:`topologia_de`.
-Os transportes (``services/messaging_kafka.py`` e ``services/messaging_rabbit.py``)
+Os transportes (``services/messaging_kafka/`` e ``services/messaging_rabbit/``)
 consomem esta estrutura e não conhecem nomes: é por isso que o produtor e o
 consumidor da notificação não puderam divergir deDefaults diferentes — o mesmo
 argumento que motivou a fachada de broker, aplicado agora ao evento.

@@ -28,7 +28,7 @@ from django.conf import settings  # noqa: E402
 from events.topology import topologia_de  # noqa: E402
 from services import idempotencia  # noqa: E402
 from services.log_estruturado import log_evento  # noqa: E402
-from services.messaging import ConsumidorEvento  # noqa: E402
+from services.messaging import consumidor_evento  # noqa: E402
 
 logger = logging.getLogger("synapseshop.worker")
 
@@ -78,7 +78,7 @@ def destino_log(evento: str) -> Mapping[str, Any]:
 
 def executar_worker(*, nome, evento, handler, client_id, falha_ativa) -> None:
     """Ciclo de vida comum: consumir até o encerramento, com log de subida/saída."""
-    consumidor = ConsumidorEvento(
+    consumidor = consumidor_evento(
         handler,
         topologia_de(evento),
         client_id=client_id,

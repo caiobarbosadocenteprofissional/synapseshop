@@ -1,6 +1,5 @@
 """Consumidor Kafka com offset manual, reentrega controlada e DLQ."""
 
-import json
 import time
 import uuid
 from typing import Any, Callable, Dict, List, Optional
@@ -10,11 +9,9 @@ from django.conf import settings
 
 from events.topology import TopologiaEvento
 from services.messaging_base import (
-    HEADER_ERRO,
-    HEADER_TENTATIVA,
     _log,
-    esperar_reentrega,
     ler_tentativa,
+    processar_evento,
 )
 from services.messaging_kafka.observabilidade import (
     registrar_ociosidade,
@@ -22,6 +19,11 @@ from services.messaging_kafka.observabilidade import (
 )
 from services.messaging_kafka.publicacao import publicar_retencao
 from services.messaging_kafka.topicos import _erro_do_broker, declarar_topologia
+
+
+def _chave_de(evento) -> Optional[str]:
+    """Chave de idempotência do evento, que é também a chave da mensagem."""
+    return evento.get("idempotency_key") if isinstance(evento, dict) else None
 
 
 class ConsumidorEvento:
@@ -108,6 +110,9 @@ class ConsumidorEvento:
                     self._ultimo_evento = time.monotonic()
                     self._ao_receber(msg)
             except KeyboardInterrupt:
+                # Ctrl+C tem de encerrar o worker: sem marcar a parada, o laço
+                # voltaria a consumir e o processo nunca sairia.
+                self._parado = True
                 _log("mensageria.consumidor.interrompido")
             except Exception as exc:  # noqa: BLE001 - reconecta com backoff
                 _log(
@@ -169,126 +174,56 @@ class ConsumidorEvento:
     def _ao_receber(self, msg: Message) -> None:
         cabecalhos = list(msg.headers() or [])
         tentativa = ler_tentativa(cabecalhos)
-        inicio = time.perf_counter()
         tempo_fila_ms = tempo_de_fila(msg)
-        try:
-            evento = json.loads(msg.value().decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError, AttributeError) as exc:
-            # Corpo ilegível não tem como ser reprocessado: vai direto para a DLQ.
-            self._matar(
-                msg, cabecalhos, None, None, tentativa,
-                f"corpo invalido: {exc}", inicio, tempo_fila_ms,
-            )
-            return
 
-        chave = evento.get("idempotency_key") if isinstance(evento, dict) else None
-        try:
-            self._handler(evento, tentativa)
-        except Exception as exc:  # noqa: BLE001 - política de falha do consumidor
-            self._reentregar(
-                msg, cabecalhos, evento, chave, exc, tentativa, inicio, tempo_fila_ms
+        def republicar(corpo, evento, cabecalhos_novos):
+            republicada = publicar_retencao(
+                corpo=corpo,
+                chave=_chave_de(evento),
+                cabecalhos=cabecalhos_novos,
+                client_id=self._client_id,
+                destino=self._topologia.topico,
             )
-            return
+            if republicada is None:
+                # Sem confirmar a republicação, o offset não é commitado: a
+                # mensagem volta a ser entregue em vez de ser perdida.
+                return "broker nao confirmou a republicacao; offset nao commitado"
+            return None
 
-        self._confirma(msg, "ok")
-        _log(
-            "mensageria.consumido",
-            correlation_id=evento.get("correlation_id") if isinstance(evento, dict) else None,
-            idempotency_key=chave,
-            topico=msg.topic(),
-            particao=msg.partition(),
-            offset=msg.offset(),
+        def confirmar() -> None:
+            self._confirma(msg, "ok")
+
+        def matar(corpo, evento, cabecalhos_dlq, _erro) -> bool:
+            publicada = publicar_retencao(
+                corpo=corpo,
+                chave=_chave_de(evento),
+                cabecalhos={
+                    **cabecalhos_dlq,
+                    "x-tópico-origem": msg.topic(),
+                    "x-particao-origem": str(msg.partition()),
+                    "x-offset-origem": str(msg.offset()),
+                    "x-morto-em": str(int(time.time() * 1000)),
+                },
+                client_id=self._client_id,
+                destino=self._topologia.dlq,
+            )
+            if publicada is None:
+                return False
+            self._confirma(msg, "dlq")
+            return True
+
+        processar_evento(
+            corpo=msg.value(),
             tentativa=tentativa,
-            resultado="ok",
-            tempo_fila_ms=tempo_fila_ms,
-            duracao_ms=round((time.perf_counter() - inicio) * 1000, 3),
-        )
-
-    def _reentregar(
-        self, msg, cabecalhos, evento, chave, exc, tentativa, inicio, tempo_fila_ms
-    ) -> None:
-        """Republica com tentativa+1 e recuo exponencial, ou mata para a DLQ."""
-        if tentativa >= settings.MENSAGERIA_MAX_RETRIES:
-            self._matar(
-                msg, cabecalhos, evento, chave, tentativa, str(exc), inicio, tempo_fila_ms
-            )
-            return
-
-        proxima = tentativa + 1
-        espera = esperar_reentrega(proxima)
-        republished = publicar_retencao(
-            evento=evento,
-            chave=chave,
-            cabecalhos={HEADER_TENTATIVA: proxima, HEADER_ERRO: str(exc)[:500]},
-            client_id=self._client_id,
-            destino=self._topologia.topico,
-        )
-        if republished is None:
-            # Sem confirmar a republicação, o offset não é commitado: a
-            # mensagem volta a ser entregue em vez de ser perdida.
-            _log(
-                "mensageria.reentrega.falhou",
-                idempotency_key=chave,
-                tentativa=tentativa,
-                topico=msg.topic(),
-                particao=msg.partition(),
-                offset=msg.offset(),
-                erro="broker nao confirmou a republicacao; offset nao commitado",
-            )
-            time.sleep(espera)
-            return
-
-        time.sleep(espera)
-        self._confirma(msg, f"reentrega:{proxima}")
-        _log(
-            "mensageria.reentrega",
-            idempotency_key=chave,
-            topico=msg.topic(),
-            particao=msg.partition(),
-            offset=msg.offset(),
-            tentativa=tentativa,
-            proxima_tentativa=proxima,
-            espera_ms=round(espera * 1000, 3),
-            erro=str(exc)[:500],
-            tempo_fila_ms=tempo_fila_ms,
-            duracao_ms=round((time.perf_counter() - inicio) * 1000, 3),
-        )
-
-    def _matar(self, msg, cabecalhos, evento, chave, tentativa, erro, inicio, tempo_fila_ms) -> None:
-        """Esgotou as tentativas: publica na DLQ e então confirma o offset."""
-        cabecalhos_dlq = {
-            HEADER_TENTATIVA: tentativa,
-            HEADER_ERRO: str(erro)[:500],
-            "x-tópico-origem": msg.topic(),
-            "x-particao-origem": str(msg.partition()),
-            "x-offset-origem": str(msg.offset()),
-            "x-morto-em": str(int(time.time() * 1000)),
-        }
-        publicada = publicar_retencao(
-            evento=evento,
-            chave=chave,
-            cabecalhos=cabecalhos_dlq,
-            client_id=self._client_id,
-            destino=self._topologia.dlq,
-        )
-        if publicada is None:
-            _log(
-                "mensageria.dlq.falhou",
-                idempotency_key=chave,
-                tentativa=tentativa,
-                erro="broker nao confirmou a publicacao na DLQ; offset nao commitado",
-            )
-            return
-        self._confirma(msg, "dlq")
-        _log(
-            "mensageria.dlq",
-            idempotency_key=chave,
-            topico=msg.topic(),
-            particao=msg.partition(),
-            offset=msg.offset(),
-            dlq=self._topologia.dlq,
-            tentativa=tentativa,
-            erro=str(erro)[:500],
-            tempo_fila_ms=tempo_fila_ms,
-            duracao_ms=round((time.perf_counter() - inicio) * 1000, 3),
+            handler=self._handler,
+            republicar=republicar,
+            confirmar=confirmar,
+            matar=matar,
+            campos=lambda: {
+                "topico": msg.topic(),
+                "particao": msg.partition(),
+                "offset": msg.offset(),
+                "tempo_fila_ms": tempo_fila_ms,
+            },
+            destino_dlq=self._topologia.dlq,
         )

@@ -22,6 +22,8 @@ from django.core.cache import cache as django_cache
 from freezegun import freeze_time
 from rest_framework.test import APIClient
 
+from services.messaging_base import MensageriaIndisponivel, ResultadoPublicacao
+
 
 # --------------------------------------------------------------------------- #
 # Isolamento entre testes
@@ -255,7 +257,7 @@ class FakeProdutorEvento:
         FakeProdutorEvento.publicados.append(
             {"evento": evento, "idempotency_key": idempotency_key, "topologia": self.topologia}
         )
-        return (0, 0)
+        return ResultadoPublicacao(confirmado=True, identificador="fake:0")
 
 
 class ProdutorEventoIndisponivel:
@@ -271,8 +273,6 @@ class ProdutorEventoIndisponivel:
         return False
 
     def publicar(self, *args, **kwargs):
-        from services.messaging import MensageriaIndisponivel
-
         raise MensageriaIndisponivel("broker indisponivel (fake)")
 
 
@@ -281,7 +281,12 @@ def broker_disponivel(monkeypatch, settings):
     """Liga a mensageria e troca o produtor por um fake em memória."""
     settings.MENSAGERIA_ENABLED = True
     FakeProdutorEvento.publicados = []
-    monkeypatch.setattr("services.publicacao.ProdutorEvento", FakeProdutorEvento)
+    monkeypatch.setattr(
+        "services.publicacao.produtor_evento",
+        lambda topologia, client_id="synapseshop-api": FakeProdutorEvento(
+            topologia, client_id
+        ),
+    )
     return FakeProdutorEvento.publicados
 
 
@@ -290,7 +295,8 @@ def broker_indisponivel(monkeypatch, settings):
     """Liga a mensageria e faz toda publicação falhar (broker fora do ar)."""
     settings.MENSAGERIA_ENABLED = True
     monkeypatch.setattr(
-        "services.publicacao.ProdutorEvento", ProdutorEventoIndisponivel
+        "services.publicacao.produtor_evento",
+        lambda *args, **kwargs: ProdutorEventoIndisponivel(),
     )
     return ProdutorEventoIndisponivel
 

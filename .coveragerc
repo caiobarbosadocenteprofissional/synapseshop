@@ -4,9 +4,12 @@
 # serviço externo para rodar. Ficam de fora:
 #   - migrações e arquivos de pacote (sem lógica);
 #   - a configuração de settings (efeitos colaterais de import);
-#   - as pontas WSGI/ASGI (só existem no servidor);
-#   - os transportes de broker (RabbitMQ/Kafka), que só executam contra um
-#     broker real e por isso são exercitados pelo smoke test do Compose.
+#   - as pontas WSGI/ASGI (só existem no servidor).
+#
+# Os transportes de broker (RabbitMQ e Kafka) **são** medidos: eles são
+# exercitados com broker de mentira (`tests/unit/test_services_messaging_brokers.py`),
+# e a política de reentrega que eles compartilham é medida em
+# `services/messaging_base.py`.
 [run]
 omit =
     */migrations/*
@@ -15,9 +18,6 @@ omit =
     config/settings_test.py
     config/asgi.py
     config/wsgi.py
-    services/messaging_kafka/*
-    services/messaging_rabbit.py
-    services/messaging_rabbit_infra.py
 
 [report]
 # Meta da equipe (ver README/Aula 12): 85% global. O relatório `term-missing`

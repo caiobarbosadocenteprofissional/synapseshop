@@ -1,4 +1,10 @@
-"""Conexão e topologia AMQP usadas pelo transporte RabbitMQ."""
+"""Topologia AMQP: conexão, exchanges, filas e DLQs.
+
+Fica num módulo só porque topologia e conexão são a mesma coisa no AMQP: quem
+declara as filas precisa de um canal, e quem tem um canal já tem a conexão.
+No Kafka as duas coisas são separadas (``confluent_kafka.admin`` fala com o
+broker sem passar pelo consumidor).
+"""
 
 import pika
 from django.conf import settings
@@ -6,7 +12,7 @@ from django.conf import settings
 from events.topology import topologias
 
 
-def _conexao(client_id: str = "") -> pika.BlockingConnection:
+def conexao(client_id: str = "") -> pika.BlockingConnection:
     """Abre uma conexão AMQP com heartbeat e timeout de bloqueio definidos.
 
     ``client_id`` vira o nome da conexão na Management UI do RabbitMQ. No Kafka o
@@ -31,9 +37,9 @@ def _conexao(client_id: str = "") -> pika.BlockingConnection:
     return pika.BlockingConnection(parametros)
 
 
-def fechar_recursos(canal, conexao) -> None:
+def fechar_recursos(canal, conexao_ativa) -> None:
     """Fecha canal e conexão best effort; recursos já fechados são ignorados."""
-    for recurso in (canal, conexao):
+    for recurso in (canal, conexao_ativa):
         try:
             if recurso is not None and recurso.is_open:
                 recurso.close()

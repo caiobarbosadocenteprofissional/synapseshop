@@ -14,8 +14,8 @@ O que ele faz ao receber uma mensagem:
 4. registra a chave de deduplicação com TTL, para que a próxima reentrega seja
    reconhecida.
 
-Se qualquer passo levantar exceção, a exceção sobe para
-``services.messaging.ConsumidorEvento``, que aplica a política de reentrega
+Se qualquer passo levantar exceção, a exceção sobe para a política de consumo
+compartilhada (``services.messaging_base``), que aplica a política de reentrega
 (recuo exponencial) e, ao esgotar as tentativas, deixa a mensagem morrer para a
 DLQ.
 

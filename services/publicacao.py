@@ -24,7 +24,7 @@ from django.conf import settings
 
 from events.topology import TopologiaEvento
 from services.log_estruturado import log_evento
-from services.messaging import MensageriaIndisponivel, ProdutorEvento
+from services.messaging import MensageriaIndisponivel, produtor_evento
 
 logger = logging.getLogger("synapseshop.mensageria")
 
@@ -59,7 +59,7 @@ def publicar_evento(
         return False
 
     try:
-        with ProdutorEvento(topologia, client_id=client_id) as produtor:
+        with produtor_evento(topologia, client_id=client_id) as produtor:
             produtor.publicar(evento, idempotency_key)
         return True
     except MensageriaIndisponivel as exc:

@@ -14,9 +14,10 @@ O que ele faz ao receber uma mensagem:
 4. registra a chave de deduplicação com TTL e publica ``NotificacaoEnviada``,
    fechando a cadeia.
 
-Se qualquer passo levantar exceção, a exceção sobe para
-``services.messaging.ConsumidorEvento``, que aplica a política de reentrega (recuo
-exponencial) e, ao esgotar as tentativas, deixa a mensagem morrer para a DLQ.
+Se qualquer passo levantar exceção, a exceção sobe para a política de consumo
+compartilhada (``services.messaging_base``), que aplica a política de reentrega
+(recuo exponencial) e, ao esgotar as tentativas, deixa a mensagem morrer para a
+DLQ.
 
 Este worker é a **segunda prova** do par produtor/consumidor da Camada 5: o
 ``pedido-worker`` consome o que a API publica, e este consome o que a API publica
