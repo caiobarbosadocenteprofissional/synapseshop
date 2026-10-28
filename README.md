@@ -75,6 +75,45 @@ automatizados.
 
 ---
 
+## 18. Conexão Segura, SQL Injection e Painel Streamlit (Aula 19)
+
+### Conexão Segura com PostgreSQL
+- **Variáveis de ambiente:** Todas as credenciais são injetadas via `.env` (`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_SSLMODE=require`).
+- **SQLAlchemy com pooling:** `pool_size`, `max_overflow`, `pool_timeout`, `pool_pre_ping` e `pool_recycle` configurados.
+- **SSL/TLS obrigatório:** `DB_SSLMODE=require` com `connect_args` e `connect_timeout` adequados.
+- **Módulo centralizado:** `db.py` fornece `create_secure_engine()`, `execute_query()` com **consultas parametrizadas** e helpers seguros.
+
+### Prevenção a SQL Injection
+- **Zero interpolação:** Todas as queries utilizam `text()` com **bind parameters** (`:param`). É **vedada** a interpolação direta de strings.
+- **ORDER BY seguro:** Uso de *allow-list* (`ALLOWED_ORDER_COLUMNS`/`ALLOWED_ORDER_DIRECTIONS`) para ordenação dinâmica.
+- **Filtros parametrizados:** Exemplos com `ANY(:statuses)`, intervalos de datas e parâmetros validados.
+- **Testes de mitigação:** Consultas com payloads maliciosos (`abc' OR '1'='1`) são tratadas como literais, sem execução de código SQL injetado.
+
+### Painel Streamlit
+- **Local:** `dashboard/app.py`
+- **Filtros dinâmicos:** Pelo menos dois filtros (intervalo de datas e seleção múltipla por status).
+- **Visualização:** `st.dataframe` para tabelas e gráficos dinâmicos (`st.bar_chart`, `st.line_chart`).
+- **Cache otimizado:** Uso de `@st.cache_data(ttl=60)` para reduzir carga no banco.
+- **Consultas seguras:** Todas as consultas passam pelo módulo `db` com parâmetros.
+
+### Execução com Docker Compose (Live Reload)
+```bash
+# Copiar variáveis de ambiente
+cp .env.example .env
+
+# Subir todos os serviços incluindo o painel Streamlit
+docker-compose up --build
+```
+
+**Serviços:**
+| Serviço | Porta | Objetivo |
+| :--- | :--- | :--- |
+| `streamlit` | `8501` | Painel analítico Streamlit com bind-mount para live reload |
+
+**Live reload:** Os diretórios `./dashboard` e `./db.py` são montados via bind-mount (`:rw`), permitindo que alterações locais reflitam instantaneamente no navegador sem rebuild. Streamlit roda com `--server.runOnSave=true`.
+
+---
+
 ## 5. Arquitetura-Alvo em 6 Camadas
 
 O sistema é projetado em **6 camadas lógicas**, conteinerizadas via Docker e orquestradas com

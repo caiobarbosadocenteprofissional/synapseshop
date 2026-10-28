@@ -23,3 +23,8 @@ pytest==9.1.*
 pytest-django==4.14.*
 pytest-cov==7.1.*
 freezegun==1.5.*
+# Aula 19: Conexão segura, SQL Injection mitigation e painel Streamlit
+SQLAlchemy==2.0.*
+psycopg[binary]==3.3.*
+streamlit==1.40.*
+python-dotenv==1.0.*
