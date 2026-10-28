@@ -114,6 +114,36 @@ docker-compose up --build
 
 ---
 
+## 19. Dashboard de Desempenho da API em Streamlit (Aula 20)
+
+### Objetivo
+Painel de observabilidade integrado ao mini-backend, com métricas **reais** das requisições HTTP. Não há geração sintética nem fallback aleatório: a fonte é a tabela `repositories_apirequestlog`.
+
+### Coleta
+- `ApiRequestLogMiddleware` (`api/middleware.py`) mede a duração com `perf_counter` e grava método, rota, status e latência para `/api/*` e `/health*`.
+- A gravação acontece no `finally` e nunca derruba a resposta: falhas na tabela são registradas no log estruturado e ignoradas.
+- `API_METRICS_ENABLED=false` desliga a coleta sem remover o middleware; os testes ficam desligados por padrão em `config/settings_test.py`.
+- A migração `repositories/migrations/0005_apirequestlog.py` cria a tabela com índices por data, endpoint e status.
+
+### Painel
+- KPIs: total de requisições, latência média, p95 e taxa de erro.
+- Gráficos: throughput por dia, latência média por dia, distribuição por status e top endpoints.
+- Filtros: período, endpoint e faixa de status (2xx/3xx/4xx/5xx).
+- `@st.cache_data(ttl=60)` em todas as consultas.
+- Tabela de amostras com até 50.000 linhas por consulta.
+
+### Execução
+```bash
+docker compose up -d --build streamlit
+# Acessar: http://localhost:8501
+```
+
+Para aplicar a migração manualmente no serviço da API:
+
+```bash
+docker compose exec api python manage.py migrate
+```
+
 ## 5. Arquitetura-Alvo em 6 Camadas
 
 O sistema é projetado em **6 camadas lógicas**, conteinerizadas via Docker e orquestradas com
@@ -796,6 +826,7 @@ então o ambiente também sobe sem `.env` (com os valores de dev).
 | `CACHE_TTL_LISTA` | `60` | `api` (`config/settings.py` — TTL da listagem em segundos) |
 | `CACHE_TTL_DETALHE` | `300` | `api` (`config/settings.py` — TTL do detalhe em segundos) |
 | `CACHE_TTL_PEDIDO` | `60` | `api`, `pedido-worker`, `notificacao-worker` (`config/settings.py` — TTL do detalhe do pedido, Aula 11) |
+| `API_METRICS_ENABLED` | `true` | `api` (`config/settings.py` — kill-switch da coleta do dashboard, Aula 20) |
 | `RABBITMQ_HOST` | `rabbitmq` (Compose) · `localhost` (código) | `api`, `pedido-worker`, `notificacao-worker` |
 | `RABBITMQ_PORT` | `5672` | `api`, `pedido-worker` |
 | `RABBITMQ_USER` / `RABBITMQ_PASSWORD` | `guest` / `guest` | `api`, `pedido-worker` |

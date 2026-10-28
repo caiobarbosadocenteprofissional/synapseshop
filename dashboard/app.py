@@ -1,8 +1,8 @@
-﻿"""Painel analítico do SynapseShop (Aula 19).
+"""Dashboard de desempenho da API do SynapseShop (Aula 20).
 
-Consultas exclusivamente parametrizadas via ``db.execute_query`` (SQLAlchemy
-``text()`` + bind parameters), com cache de 60 segundos para proteger o banco.
-O painel usa os dados reais de pedidos; não há massa sintética de fallback.
+As métricas vêm exclusivamente da tabela ``repositories_apirequestlog``, alimentada pelo
+middleware ``ApiRequestLogMiddleware``. Não há dados sintéticos de fallback: se
+a coleta estiver desligada ou a tabela vazia, o painel informa o operador.
 """
 
 from __future__ import annotations
@@ -23,110 +23,160 @@ try:
 except Exception:
     execute_query = None
 
-STATUS_PEDIDO = ["PENDENTE", "PROCESSANDO", "PAGO", "CANCELADO", "FALHA"]
-
-st.set_page_config(page_title="SynapseShop - Painel de Dados", layout="wide")
-st.title("SynapseShop - Painel de Dados")
-st.caption("Pedidos e clientes | Consultas parametrizadas, cache e atualização em tempo real")
+STATUS_GROUPS = {
+    "2xx (sucesso)": list(range(200, 300)),
+    "3xx (redirecionamento)": list(range(300, 400)),
+    "4xx (erro do cliente)": list(range(400, 500)),
+    "5xx (erro do servidor)": list(range(500, 600)),
+}
 
 
 @st.cache_data(ttl=60)
-def carregar_pedidos(
+def carregar_endpoints() -> list[str]:
+    if execute_query is None:
+        raise RuntimeError("Módulo db.py não pôde ser importado.")
+    rows = execute_query(
+        "SELECT DISTINCT endpoint FROM repositories_apirequestlog ORDER BY endpoint"
+    )
+    return [row["endpoint"] for row in rows]
+
+
+@st.cache_data(ttl=60)
+def carregar_metricas(
     data_inicial: date,
     data_final: date,
-    status: tuple[str, ...],
-    cliente: str,
+    endpoint: str,
+    status_codes: tuple[int, ...],
 ) -> pd.DataFrame:
     if execute_query is None:
         raise RuntimeError("Módulo db.py não pôde ser importado.")
 
     sql = """
-        SELECT
-            p.id,
-            u.username AS cliente,
-            p.status,
-            p.total,
-            p.created_at
-        FROM repositories_pedido AS p
-        JOIN repositories_user AS u ON u.id = p.usuario_id
-        WHERE p.created_at::date BETWEEN :data_inicial AND :data_final
+        SELECT method, endpoint, status_code, response_time_ms, created_at
+        FROM repositories_apirequestlog
+        WHERE created_at::date BETWEEN :data_inicial AND :data_final
     """
     params: dict[str, object] = {
         "data_inicial": data_inicial,
         "data_final": data_final,
     }
-
-    if status:
-        sql += " AND p.status = ANY(:statuses)"
-        params["statuses"] = list(status)
-
-    cliente = cliente.strip()
-    if cliente:
-        sql += " AND u.username ILIKE :cliente"
-        params["cliente"] = f"%{cliente}%"
-
-    sql += " ORDER BY p.created_at DESC LIMIT 500"
+    if endpoint != "Todos":
+        sql += " AND endpoint = :endpoint"
+        params["endpoint"] = endpoint
+    if status_codes:
+        sql += " AND status_code = ANY(:status_codes)"
+        params["status_codes"] = list(status_codes)
+    sql += " ORDER BY created_at DESC LIMIT 50000"
     return pd.DataFrame(execute_query(sql, params))
 
+
+st.set_page_config(page_title="SynapseShop - Desempenho da API", layout="wide")
+st.title("SynapseShop - Desempenho da API")
+st.caption("Métricas reais coletadas pelo middleware | cache de 60 s")
+
+try:
+    endpoints_disponiveis = carregar_endpoints()
+except Exception as exc:
+    st.error(f"Não foi possível consultar a tabela de métricas: {exc}")
+    st.info(
+        "Confirme se a migração 0005 foi aplicada e se API_METRICS_ENABLED=true."
+    )
+    st.stop()
 
 with st.sidebar:
     st.header("Filtros")
     hoje = date.today()
-    data_inicial = st.date_input("Data inicial", value=hoje - timedelta(days=30))
+    data_inicial = st.date_input("Data inicial", value=hoje - timedelta(days=7))
     data_final = st.date_input("Data final", value=hoje)
-    status_selecionados = st.multiselect(
-        "Status do pedido",
-        options=STATUS_PEDIDO,
-        default=STATUS_PEDIDO,
+    endpoint = st.selectbox(
+        "Endpoint",
+        options=["Todos", *endpoints_disponiveis],
+        index=0,
     )
-    cliente = st.text_input("Cliente (username)", value="")
+    status_labels = st.multiselect(
+        "Faixa de status",
+        options=list(STATUS_GROUPS),
+        default=list(STATUS_GROUPS),
+    )
+
+status_codes = tuple(
+    codigo for label in status_labels for codigo in STATUS_GROUPS[label]
+)
 
 try:
-    df = carregar_pedidos(
-        data_inicial,
-        data_final,
-        tuple(status_selecionados),
-        cliente,
-    )
+    df = carregar_metricas(data_inicial, data_final, endpoint, status_codes)
 except Exception as exc:
-    st.error(f"Não foi possível consultar os pedidos: {exc}")
-    st.info("Verifique a conexão PostgreSQL e as variáveis DB_* do serviço streamlit.")
+    st.error(f"Não foi possível carregar as métricas: {exc}")
     st.stop()
 
 if df.empty:
-    st.info("Nenhum pedido encontrado para os filtros selecionados.")
+    st.info(
+        "Nenhuma métrica encontrada. Gere tráfego na API ou ajuste os filtros; "
+        "o painel não inventa dados de fallback."
+    )
     st.stop()
 
 df["created_at"] = pd.to_datetime(df["created_at"])
-df["total"] = pd.to_numeric(df["total"], errors="coerce").fillna(0)
+df["response_time_ms"] = pd.to_numeric(df["response_time_ms"], errors="coerce")
+df["status_code"] = pd.to_numeric(df["status_code"], errors="coerce").astype("Int64")
+
+total = len(df)
+latencia_media = df["response_time_ms"].mean()
+latencia_p95 = df["response_time_ms"].quantile(0.95)
+taxa_erro = (df["status_code"] >= 400).mean() * 100
 
 kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-kpi1.metric("Pedidos", f"{len(df):,}".replace(",", "."))
-kpi2.metric("Receita", f"R$ {df['total'].sum():,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
-kpi3.metric("Ticket médio", f"R$ {df['total'].mean():,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
-kpi4.metric("Cancelados", int((df["status"] == "CANCELADO").sum()))
+kpi1.metric("Requisições", f"{total:,}".replace(",", "."))
+kpi2.metric("Latência média", f"{latencia_media:.1f} ms")
+kpi3.metric("Latência p95", f"{latencia_p95:.1f} ms")
+kpi4.metric("Taxa de erro", f"{taxa_erro:.1f}%")
 
 st.divider()
 
 col1, col2 = st.columns(2)
 with col1:
-    st.subheader("Pedidos por status")
-    status_df = (
-        df.groupby("status", as_index=False)
+    st.subheader("Throughput por dia")
+    por_dia = (
+        df.assign(dia=df["created_at"].dt.date)
+        .groupby("dia")
         .size()
-        .rename(columns={"size": "pedidos"})
-        .set_index("status")
+        .rename("requisicoes")
     )
-    st.bar_chart(status_df)
-
-with col2:
-    st.subheader("Pedidos por dia")
-    por_dia = df.assign(dia=df["created_at"].dt.date).groupby("dia").size()
     st.line_chart(por_dia)
 
+with col2:
+    st.subheader("Latência média por dia")
+    latencia_dia = (
+        df.assign(dia=df["created_at"].dt.date)
+        .groupby("dia")["response_time_ms"]
+        .mean()
+        .rename("latencia_ms")
+    )
+    st.line_chart(latencia_dia)
+
 st.divider()
-st.subheader("Pedidos encontrados")
-tabela = df[["id", "cliente", "status", "total", "created_at"]].copy()
-tabela["created_at"] = tabela["created_at"].dt.strftime("%d/%m/%Y %H:%M")
+
+col3, col4 = st.columns(2)
+with col3:
+    st.subheader("Distribuição por status")
+    por_status = df.groupby("status_code").size().rename("requisicoes")
+    st.bar_chart(por_status)
+
+with col4:
+    st.subheader("Top endpoints")
+    top_endpoints = (
+        df.groupby("endpoint")
+        .size()
+        .sort_values(ascending=False)
+        .head(10)
+        .rename("requisicoes")
+    )
+    st.bar_chart(top_endpoints)
+
+st.divider()
+st.subheader("Amostras coletadas")
+tabela = df[["created_at", "method", "endpoint", "status_code", "response_time_ms"]].copy()
+tabela["created_at"] = tabela["created_at"].dt.strftime("%d/%m/%Y %H:%M:%S")
+tabela["response_time_ms"] = tabela["response_time_ms"].round(1)
 st.dataframe(tabela, use_container_width=True, hide_index=True)
-st.caption("Limite de 500 pedidos por consulta; refine os filtros para ver outros resultados.")
+st.caption("Até 50.000 amostras por consulta; reduza o período para detalhar.")

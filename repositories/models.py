@@ -288,3 +288,35 @@ class EventoProcessado(models.Model):
 
     def __str__(self):
         return f"{self.evento}:{self.idempotency_key}"
+
+
+class ApiRequestLog(models.Model):
+    """Amostra de requisição HTTP usada pelo dashboard de desempenho (Aula 20).
+
+    O middleware ``api.middleware.ApiRequestLogMiddleware`` grava uma linha por
+    requisição de API/health. A tabela é a fonte do painel Streamlit: sem ela,
+    as métricas de latência e throughput não teriam de onde sair.
+    """
+
+    method = models.CharField(max_length=8)
+    endpoint = models.CharField(max_length=255)
+    status_code = models.PositiveSmallIntegerField()
+    response_time_ms = models.FloatField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["-created_at"], name="idx_request_created"),
+            models.Index(
+                fields=["endpoint", "-created_at"],
+                name="idx_request_endpoint",
+            ),
+            models.Index(
+                fields=["status_code", "-created_at"],
+                name="idx_request_status",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.method} {self.endpoint} -> {self.status_code}"

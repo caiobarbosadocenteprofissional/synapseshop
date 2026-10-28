@@ -46,6 +46,10 @@ CACHES = {
 # publicação substituem explicitamente o produtor por um fake.
 MENSAGERIA_ENABLED = False
 
+# A coleta de métricas da Aula 20 grava no banco; fica desligada por padrão para
+# não acoplar cada teste ao middleware. Os testes específicos ligam via override.
+API_METRICS_ENABLED = False
+
 # Hashing de senha rápido: o login é exercitado em vários testes de integração.
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 

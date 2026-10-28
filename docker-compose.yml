@@ -18,6 +18,7 @@ x-django-env: &django-env
   CACHE_TTL_LISTA: ${CACHE_TTL_LISTA:-60}
   CACHE_TTL_DETALHE: ${CACHE_TTL_DETALHE:-300}
   CACHE_TTL_PEDIDO: ${CACHE_TTL_PEDIDO:-60}
+  API_METRICS_ENABLED: ${API_METRICS_ENABLED:-true}
   # `MENSAGERIA_ENABLED` é a grafia canônica; `MESSAGERIA_ENABLED` (a antiga, em
   # inglês) continua valendo como fallback, para que o `.env` de quem já tinha
   # não mude de comportamento sem querer.

@@ -75,7 +75,12 @@ AUTH_USER_MODEL = "repositories.User"
 
 MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
+    "api.middleware.ApiRequestLogMiddleware",
 ]
+
+# Aula 20: o dashboard de desempenho lê esta tabela. O kill-switch permite
+# desligar a coleta em ambientes onde ela não faz sentido (ex.: testes).
+API_METRICS_ENABLED = env_bool("API_METRICS_ENABLED", True)
 
 ROOT_URLCONF = "config.urls"
 

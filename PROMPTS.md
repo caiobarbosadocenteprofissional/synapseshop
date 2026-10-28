@@ -209,3 +209,8 @@ de integrar ao código, seguindo as boas práticas do projeto.
 - **Contexto:** Aula 19 - Conexão segura, mitigação de SQL Injection e painel Streamlit.
 - **Prompt:** "Execute a spec da aula 19 seguindo as diretrizes e skills."
 - **Resultado / Ajustes:** Criado `db.py` com SQLAlchemy (pooling, timeouts, SSL/TLS e `DB_SSLMODE`), consultas exclusivamente parametrizadas com `text()` e bind parameters, além de allow-list para `ORDER BY`. Criado `dashboard/app.py` com filtros de período, status e cliente, KPIs, `st.dataframe`, `st.bar_chart`, `st.line_chart` e `@st.cache_data(ttl=60)`. Adicionados `Dockerfile.streamlit`, o serviço `streamlit` no Compose com bind-mount para live reload, dependências e variáveis `DB_*`. Atualizados `README.md` e `PROMPTS.md`.
+
+### 2026-10-23 - Equipe SynapseShop - opencode
+- **Contexto:** Aula 20 - Dashboard de desempenho da API em Streamlit.
+- **Prompt:** "Execute a spec da aula 20 seguindo as diretrizes e skills."
+- **Resultado / Ajustes:** Implementada coleta real com `ApiRequestLog`, migração `0005_apirequestlog`, `ApiRequestLogMiddleware`, `API_METRICS_ENABLED` e testes. O dashboard lê exclusivamente `api_request_logs` (KPIs, latency p95, throughput, status e top endpoints), com filtros e `@st.cache_data(ttl=60)`; o fallback sintético foi removido. Atualizados Compose, `.env.example`, README e testes.
