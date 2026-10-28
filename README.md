@@ -384,7 +384,6 @@ fica na Aula 7 — escopo SpecDD preservado).
 | `inventory/app/routes.py` | Rotas do inventário sob `/inventory/items`. |
 | `inventory/migrations/` | Migrações Alembic (`versions/0001_create_inventory_items.py`). |
 | `inventory/scripts/` | Smoke test e teste transacional com coleta de tempos. |
-| `inventory/Dockerfile` | Imagem com multistage build e usuário não-root (porta `8100`). |
 
 ### Endpoints
 

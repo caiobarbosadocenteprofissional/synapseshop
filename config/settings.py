@@ -309,11 +309,16 @@ KAFKA_GRUPO_NOTIFICACAO = os.environ.get("KAFKA_GRUPO_NOTIFICACAO", "notificacao
 # Política de reentrega do consumidor: attempts = 1 + MAX_RETRIES. Depois de
 # esgotar as tentativas a mensagem é morta: no RabbitMQ por `nack` sem requeue
 # (a dead-letter exchange encaminha), no Kafka por publicação no tópico da DLQ.
+# A grafia antiga (`MESSAGERIA_*`) ainda é lida, com aviso.
 MENSAGERIA_MAX_RETRIES = env_int(
     "MENSAGERIA_MAX_RETRIES", 3, obsoleto="MESSAGERIA_MAX_RETRIES"
 )
-MENSAGERIA_BACKOFF_BASE_MS = env_int("MENSAGERIA_BACKOFF_BASE_MS", 250)
-MENSAGERIA_BACKOFF_MAX_MS = env_int("MENSAGERIA_BACKOFF_MAX_MS", 5000)
+MENSAGERIA_BACKOFF_BASE_MS = env_int(
+    "MENSAGERIA_BACKOFF_BASE_MS", 250, obsoleto="MESSAGERIA_BACKOFF_BASE_MS"
+)
+MENSAGERIA_BACKOFF_MAX_MS = env_int(
+    "MENSAGERIA_BACKOFF_MAX_MS", 5000, obsoleto="MESSAGERIA_BACKOFF_MAX_MS"
+)
 
 # Aula 11 (observabilidade): um consumidor sem tráfego é o caso mais difícil de
 # diagnosticar — não há log por mensagem e a única evidência de vida é a subida.

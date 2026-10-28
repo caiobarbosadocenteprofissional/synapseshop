@@ -18,7 +18,10 @@ x-django-env: &django-env
   CACHE_TTL_LISTA: ${CACHE_TTL_LISTA:-60}
   CACHE_TTL_DETALHE: ${CACHE_TTL_DETALHE:-300}
   CACHE_TTL_PEDIDO: ${CACHE_TTL_PEDIDO:-60}
-  MESSAGERIA_ENABLED: ${MESSAGERIA_ENABLED:-true}
+  # `MENSAGERIA_ENABLED` é a grafia canônica; `MESSAGERIA_ENABLED` (a antiga, em
+  # inglês) continua valendo como fallback, para que o `.env` de quem já tinha
+  # não mude de comportamento sem querer.
+  MENSAGERIA_ENABLED: ${MENSAGERIA_ENABLED:-${MESSAGERIA_ENABLED:-true}}
   MENSAGERIA_BROKER: ${MENSAGERIA_BROKER:-kafka}
   # Dentro da rede do Compose o bootstrap é o listener interno (29092).
   # Fora do Docker use localhost:9092 (ver .env.example).
@@ -69,6 +72,7 @@ services:
     image: synapseshop:dev
     container_name: synapseshop-api
     restart: unless-stopped
+    command: ["sh", "-c", "python manage.py migrate --noinput && python manage.py runserver 0.0.0.0:8000"]
     ports:
       - "8000:8000"
     environment:
@@ -187,11 +191,21 @@ services:
   # Microsserviço de inventário (Aulas 5-6): FastAPI + SQLAlchemy, serviço
   # **independente** da API Django — ele compartilha só o container Postgres e
   # não participa do fluxo Pedido ➔ Pagamento ➔ Notificação.
+  # A imagem usa o mesmo Dockerfile da API (multistage + usuário não-root):
+  # muda o contexto de build, a porta e o comando de entrada.
   inventory:
-    build: ./inventory
+    build:
+      context: ./inventory
+      dockerfile: ../Dockerfile
+      args:
+        PORT: 8100
+        APP_CMD: >-
+          alembic upgrade head
+          && python -m uvicorn app.main:app --host 0.0.0.0 --port 8100
     image: synapseshop-inventory:dev
     container_name: synapseshop-inventory
     restart: unless-stopped
+    command: ["sh", "-c", "alembic upgrade head && python -m uvicorn app.main:app --host 0.0.0.0 --port 8100"]
     ports:
       - "8100:8100"
     environment:
