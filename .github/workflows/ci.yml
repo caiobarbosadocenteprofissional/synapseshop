@@ -2,12 +2,22 @@ name: CI
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main, master, dev]
   pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+# Segredos ficam em Settings -> Secrets and variables -> Actions
+# (ex.: DJANGO_SECRET_KEY). Sem o segredo, o CI usa um valor efêmero apenas
+# para os testes; nenhuma credencial real é versionada.
+env:
+  DJANGO_SECRET_KEY: ${{ secrets.DJANGO_SECRET_KEY || 'ci-insecure-synapseshop' }}
+  DJANGO_DEBUG: "false"
+  MENSAGERIA_ENABLED: "false"
 
 jobs:
-  testes:
-    name: Testes e contrato
+  test-and-lint:
+    name: Testes e lint
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -18,12 +28,46 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Dependencias
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint (ruff)
+        run: python -m ruff check .
+
+      - name: Suite com cobertura
+        run: |
+          mkdir -p reports
+          python -m pytest -q --junitxml=reports/junit.xml
+
+      - name: Publica relatorios
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: relatorios-testes
+          path: |
+            reports/junit.xml
+            coverage.xml
+
+  contrato:
+    name: Contrato OpenAPI e configuracao Django
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements.txt
 
       - name: Dependencias
         run: pip install -r requirements.txt
-
-      - name: Suite com cobertura
-        run: python -m pytest -q
 
       - name: Drift do OpenAPI
         run: python scripts/validar_openapi.py
@@ -43,6 +87,7 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
+          cache-dependency-path: inventory/requirements.txt
 
       # O servico e um deployavel separado, com dependencias proprias: por isso
       # a suite roda em um job a parte, e nao junto da suite do Django.
@@ -53,3 +98,13 @@ jobs:
 
       - name: Suite do inventario
         run: python -m pytest inventory/tests
+
+  docker-build:
+    name: Build da imagem Docker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build da imagem da API
+        run: docker build -t synapseshop-api:test .

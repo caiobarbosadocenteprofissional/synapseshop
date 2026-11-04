@@ -65,9 +65,6 @@ BASE_URL = configurar_base(
 )
 BROKER = os.environ.get("MENSAGERIA_BROKER", "kafka").strip().lower()
 
-ADMIN = {"username": "admin", "password": "admin"}
-USER = {"username": "user", "password": "user"}
-
 MARCA = str(int(time.time()))
 CHAVE_APROVADO = f"pedido-fluxo-aprovado-{MARCA}"
 CHAVE_RECUSADO = f"pedido-fluxo-recusado-{MARCA}"

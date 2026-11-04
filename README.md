@@ -3,6 +3,7 @@
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
 ![IA](https://img.shields.io/badge/IA-LLM%20%7C%20RAG%20%7C%20NL%20to%20SQL-8A2BE2)
+[![CI](https://github.com/caiobarbosadocenteprofissional/synapseshop/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/caiobarbosadocenteprofissional/synapseshop/actions/workflows/ci.yml)
 
 > Projeto desenvolvido no contexto da **SynapseTech** — empresa simulada do curso de
 > **Programação Python Avançada com IA** (100 horas · 25 aulas).
@@ -236,6 +237,49 @@ python -m pytest tests/unit/test_texto_sql.py tests/integration/test_api_ask_sql
 
 Os testes cobrem extração de SQL, allow-list, bloqueio de escrita, CTE,
 truncamento, erros `400`/`422` e mapeamento dos erros da LLM.
+
+## 21. CI/CD com GitHub Actions (Aula 22)
+
+O pipeline fica em [`.github/workflows/ci.yml`](.github/workflows/ci.yml) e roda:
+
+- em `push` para `main`, `master` e `dev`;
+- em `pull_request` direcionado a `main`/`master`;
+- manualmente, via `workflow_dispatch`.
+
+### Jobs
+
+| Job | O que valida |
+| :--- | :--- |
+| `test-and-lint` | Instala `requirements-dev.txt`, roda `ruff` e a suíte `pytest` com cobertura; publica `junit.xml` e `coverage.xml` como artefatos. |
+| `contrato` | Valida o `openapi.yaml` contra as rotas reais (`scripts/validar_openapi.py`) e executa `python manage.py check`. |
+| `testes-inventario` | Roda a suíte própria do microsserviço FastAPI (`inventory/tests`) com suas dependências. |
+| `docker-build` | Executa `docker build -t synapseshop-api:test .` para garantir que a imagem continua construindo. |
+
+Se lint, testes, contrato ou build falharem, o pipeline fica vermelho e o merge
+não deve avançar.
+
+### Segredos e variáveis
+
+Configurados em **Settings → Secrets and variables → Actions**:
+
+- `DJANGO_SECRET_KEY` — usado pelo `manage.py check` e pela suíte. Se o segredo
+  não existir (ex.: fork/PR externo), o workflow usa um valor efêmero
+  `ci-insecure-synapseshop`, suficiente para validar a configuração.
+- `DJANGO_DEBUG=false` e `MENSAGERIA_ENABLED=false` são definidos no workflow
+  para o CI não depender de um broker externo nem expor modo de depuração.
+
+Nenhuma credencial real fica no repositório; `.env*` continua no `.gitignore`.
+
+### Reproduzir localmente
+
+```bash
+pip install -r requirements-dev.txt
+python -m ruff check .
+python -m pytest -q
+python scripts/validar_openapi.py
+python manage.py check
+docker build -t synapseshop-api:test .
+```
 
 ## 5. Arquitetura-Alvo em 6 Camadas
 

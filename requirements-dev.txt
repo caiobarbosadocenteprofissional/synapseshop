@@ -1,0 +1,5 @@
+# Dependências de desenvolvimento/CI (Aula 22).
+# A imagem de runtime continua instalando apenas `requirements.txt`; o CI
+# instala este arquivo para ter o linter e o restante das dependências.
+-r requirements.txt
+ruff==0.14.*

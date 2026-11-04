@@ -1,0 +1,11 @@
+# Regras de lint usadas no CI e localmente (Aula 22).
+#
+# O conjunto abaixo é o padrão do Ruff (erros de sintaxe, imports e nomes
+# indefinidos) sem impor estilo/formatação sobre o código existente. Linhas
+# longas em português e comentários são aceitas; o objetivo do job é falhar
+# em erro real de Python, não em preferência de formatação.
+target-version = "py312"
+line-length = 120
+
+[lint]
+select = ["E4", "E7", "E9", "F"]

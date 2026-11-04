@@ -192,8 +192,6 @@ def test_pedido_duplicado_simultaneo_vencedor_devolve_200(
         def first(self):
             return pedido
 
-    filtro_real = Pedido.objects.filter
-
     def filtro_falso(*args, **kwargs):
         chamadas["n"] += 1
         if chamadas["n"] == 1:
