@@ -20,8 +20,10 @@ from api.views.pedidos import (
     PedidoCreateView,
     PedidoDetailView,
 )
+from api.views.texto_sql import AskSQLView
 
 __all__ = [
+    "AskSQLView",
     "AssistStatsView",
     "AssistView",
     "CacheStatsView",

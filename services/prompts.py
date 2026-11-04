@@ -62,6 +62,30 @@ def normalizar_logs(logs: Union[str, Iterable[str]]) -> str:
     return "\n".join(str(linha) for linha in logs)
 
 
+PROMPT_SQL_SISTEMA = (
+    "Você é um especialista em PostgreSQL e no domínio do SynapseShop, "
+    "um backend de catálogo, pedidos e pagamentos. Sua única tarefa é traduzir "
+    "a pergunta do usuário em UMA consulta SQL de leitura. "
+    "Use exclusivamente as tabelas e colunas descritas no schema fornecido. "
+    "Nunca consulte information_schema, pg_catalog ou tabelas de autenticação. "
+    "Nunca use SELECT *, comandos de escrita/DDL, transações, funções de "
+    "sistema ou comentários. Prefira aliases curtos e inclua LIMIT quando a "
+    "pergunta pedir uma amostra. Responda APENAS com SQL puro, sem markdown, "
+    "sem explicação e sem ponto e vírgula."
+)
+
+
+def montar_mensagens_sql(schema: str, pergunta: str) -> List[dict]:
+    """Mensagens do Texto-para-SQL (Aula 21)."""
+    return [
+        {"role": "system", "content": PROMPT_SQL_SISTEMA},
+        {
+            "role": "user",
+            "content": f"Schema permitido:\n{schema}\n\nPergunta:\n{pergunta}",
+        },
+    ]
+
+
 def montar_mensagens(mode: str, logs: str) -> List[dict]:
     """Monta a lista de mensagens no formato Chat Completions.
 

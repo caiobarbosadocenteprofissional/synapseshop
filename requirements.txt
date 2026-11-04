@@ -28,3 +28,6 @@ SQLAlchemy==2.0.*
 psycopg[binary]==3.3.*
 streamlit==1.40.*
 python-dotenv==1.0.*
+# Aula 21: parser SQL usado pela allow-list do Texto-para-SQL. Não é dependência
+# transitiva do Django/DRF; declarado aqui para não depender do ambiente.
+sqlparse==0.5.*

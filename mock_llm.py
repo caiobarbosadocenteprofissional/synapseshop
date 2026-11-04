@@ -142,6 +142,60 @@ def _gerar_explain(logs: str) -> str:
     )
 
 
+def _extrair_pergunta(user_content: str) -> str:
+    marcador = "Pergunta:"
+    if marcador in user_content:
+        return user_content.split(marcador, 1)[1].strip()
+    return user_content.strip()
+
+
+def _gerar_sql(pergunta: str) -> str:
+    """SQL determinístico e seguro para exercitar a Aula 21 sem provedor pago."""
+    texto = pergunta.lower()
+
+    if "mais pedidos" in texto or ("maior" in texto and "pedido" in texto):
+        return (
+            "SELECT u.username, COUNT(p.id) AS total_pedidos "
+            "FROM repositories_user u "
+            "JOIN repositories_pedido p ON p.usuario_id = u.id "
+            "GROUP BY u.username "
+            "ORDER BY total_pedidos DESC "
+            "LIMIT 5"
+        )
+    if "soma" in texto and ("pedido" in texto or "valor" in texto):
+        return "SELECT SUM(total) AS soma FROM repositories_pedido"
+    if "usuario" in texto or "usuário" in texto:
+        return (
+            "SELECT username, date_joined FROM repositories_user "
+            "ORDER BY date_joined DESC LIMIT 5"
+        )
+    if "status" in texto and "pedido" in texto:
+        return (
+            "SELECT status, COUNT(id) AS total FROM repositories_pedido "
+            "GROUP BY status ORDER BY total DESC"
+        )
+    if "categoria" in texto:
+        return (
+            "SELECT c.name, COUNT(i.id) AS total_itens "
+            "FROM repositories_category c "
+            "LEFT JOIN repositories_item i ON i.category_id = c.id "
+            "GROUP BY c.name ORDER BY total_itens DESC LIMIT 10"
+        )
+    if "pagamento" in texto:
+        return (
+            "SELECT status, COUNT(id) AS total, SUM(valor) AS valor_total "
+            "FROM repositories_pagamento GROUP BY status ORDER BY total DESC"
+        )
+    if "item" in texto or "iten" in texto or "produto" in texto:
+        return (
+            "SELECT i.name, SUM(pi.quantidade) AS unidades "
+            "FROM repositories_item i "
+            "JOIN repositories_pedidoitem pi ON pi.item_id = i.id "
+            "GROUP BY i.name ORDER BY unidades DESC LIMIT 10"
+        )
+    return "SELECT id, status, total FROM repositories_pedido ORDER BY created_at DESC LIMIT 20"
+
+
 def _gerar_resposta(mensagens: List[dict]) -> str:
     sistema = ""
     usuario = ""
@@ -152,6 +206,9 @@ def _gerar_resposta(mensagens: List[dict]) -> str:
             sistema += conteudo + "\n"
         elif papel == "user":
             usuario += conteudo + "\n"
+
+    if re.search(r"(?i)\b(sql|texto-para-sql)\b", sistema):
+        return _gerar_sql(_extrair_pergunta(usuario.strip()))
 
     logs = _extrair_logs(usuario.strip())
     modo = "explain" if re.search(r"(?i)\bexpli\w*", sistema) else "summarize"

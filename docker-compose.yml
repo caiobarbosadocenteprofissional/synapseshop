@@ -104,6 +104,11 @@ services:
       LLM_MAX_TOKENS_LIMITE: ${LLM_MAX_TOKENS_LIMITE:-1024}
       LLM_PRECO_PROMPT_USD_MILHAO: ${LLM_PRECO_PROMPT_USD_MILHAO:-0}
       LLM_PRECO_OUTPUT_USD_MILHAO: ${LLM_PRECO_OUTPUT_USD_MILHAO:-0}
+      # (Aula 21) Limites do Texto-para-SQL, aplicados pelo servidor.
+      ASK_SQL_MAX_LINHAS: ${ASK_SQL_MAX_LINHAS:-200}
+      ASK_SQL_TIMEOUT_MS: ${ASK_SQL_TIMEOUT_MS:-5000}
+      ASK_SQL_MAX_TOKENS: ${ASK_SQL_MAX_TOKENS:-512}
+      ASK_SQL_TEMPERATURE: ${ASK_SQL_TEMPERATURE:-0.0}
     depends_on:
       postgres:
         condition: service_healthy
@@ -353,6 +358,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-synapseshop}
       POSTGRES_USER: ${POSTGRES_USER:-synapseshop}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-synapseshop}
+      # (Aula 21) O painel chama a API por dentro da rede do Compose.
+      API_BASE_URL: ${API_BASE_URL:-http://api:8000}
     volumes:
       - ./dashboard:/app/dashboard:rw
       - ./db.py:/app/db.py:rw

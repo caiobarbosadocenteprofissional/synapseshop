@@ -82,6 +82,13 @@ MIDDLEWARE = [
 # desligar a coleta em ambientes onde ela não faz sentido (ex.: testes).
 API_METRICS_ENABLED = env_bool("API_METRICS_ENABLED", True)
 
+# Aula 21: Texto-para-SQL. Os limites vivem no servidor: a LLM não decide
+# quantas linhas retornar nem por quanto tempo a consulta pode rodar.
+ASK_SQL_MAX_LINHAS = env_int("ASK_SQL_MAX_LINHAS", 200)
+ASK_SQL_TIMEOUT_MS = env_int("ASK_SQL_TIMEOUT_MS", 5000)
+ASK_SQL_MAX_TOKENS = env_int("ASK_SQL_MAX_TOKENS", 512)
+ASK_SQL_TEMPERATURE = env_float("ASK_SQL_TEMPERATURE", 0.0)
+
 ROOT_URLCONF = "config.urls"
 
 TEMPLATES = [

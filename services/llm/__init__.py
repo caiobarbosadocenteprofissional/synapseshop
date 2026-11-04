@@ -141,6 +141,75 @@ def _custo_estimado_usd(tokens_prompt: int, tokens_output: int) -> float:
     ) * preco_output
 
 
+def completar(
+    *,
+    mensagens: List[dict],
+    temperature: float = 0.0,
+    max_tokens: int = 512,
+    operacao: str = "completar",
+) -> Dict[str, Any]:
+    """Chamada genérica de Chat Completions usada pelo Texto-para-SQL.
+
+    Mantém a mesma resiliência, telemetria e contrato de erro do ``assistir``;
+    a diferença é que o chamador monta as mensagens (schema + pergunta) e
+    recebe apenas ``{"conteudo", "meta"}``.
+    """
+    if not settings.LLM_API_KEY:
+        raise LLMConfiguracaoAusente(
+            "LLM_API_KEY não configurada; o gerador de SQL está desabilitado."
+        )
+
+    inicio = time.monotonic()
+    try:
+        conteudo, uso, tentativas = _chamar_com_resiliencia(
+            mensagens, temperature, max_tokens
+        )
+    except LLMErro as exc:
+        latencia_ms = round((time.monotonic() - inicio) * 1000, 3)
+        _TELEMETRIA.registrar_erro(tipo_erro=type(exc).__name__, latencia_ms=latencia_ms)
+        log(
+            "llm.falha",
+            operacao=operacao,
+            erro=type(exc).__name__,
+            estado_circuito=_CIRCUITO.estado()["estado"],
+            latencia_ms=latencia_ms,
+        )
+        raise
+
+    latencia_ms = round((time.monotonic() - inicio) * 1000, 3)
+    tokens_prompt = uso["prompt_tokens"]
+    tokens_output = uso["completion_tokens"]
+    custo = _custo_estimado_usd(tokens_prompt, tokens_output)
+    _TELEMETRIA.registrar_sucesso(
+        latencia_ms=latencia_ms,
+        tokens_prompt=tokens_prompt,
+        tokens_output=tokens_output,
+        custo_usd=custo,
+    )
+    log(
+        "llm.resposta",
+        operacao=operacao,
+        modelo=settings.LLM_MODEL,
+        tentativas=tentativas,
+        tokens_prompt=tokens_prompt,
+        tokens_output=tokens_output,
+        custo_estimado_usd=round(custo, 8),
+        latencia_ms=latencia_ms,
+        estado_circuito=_CIRCUITO.estado()["estado"],
+    )
+    return {
+        "conteudo": conteudo,
+        "meta": {
+            "tokens_prompt": tokens_prompt,
+            "tokens_output": tokens_output,
+            "tentativas": tentativas,
+            "latencia_ms": latencia_ms,
+            "custo_estimado_usd": round(custo, 8),
+            "modelo": settings.LLM_MODEL,
+        },
+    }
+
+
 def assistir(
     *,
     mode: str,
@@ -229,6 +298,7 @@ __all__ = [
     "LLMTaxaLimitada",
     "LLMTimeout",
     "assistir",
+    "completar",
     "metricas",
     "redefinir_circuito",
     "redigir",

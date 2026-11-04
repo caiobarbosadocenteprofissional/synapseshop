@@ -6,6 +6,7 @@ from api.auth import (
     TokenRefreshViewWithThrottle,
 )
 from api.views import (
+    AskSQLView,
     AssistStatsView,
     AssistView,
     CacheStatsView,
@@ -50,6 +51,9 @@ urlpatterns = [
     # da camada de IA (latência, erros, tokens, custo e estado do circuito).
     path("assist/", AssistView.as_view(), name="assist"),
     path("assist/stats/", AssistStatsView.as_view(), name="assist_stats"),
+    # Aula 21: Texto-para-SQL (admin-only). O slash final é o padrão do router
+    # da API; a interface Streamlit usa exatamente esta rota.
+    path("ask_sql/", AskSQLView.as_view(), name="ask_sql"),
 ]
 
 urlpatterns += router.urls

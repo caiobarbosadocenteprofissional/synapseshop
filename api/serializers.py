@@ -181,6 +181,24 @@ class AssistRequestSerializer(serializers.Serializer):
         return value
 
 
+class AskSQLRequestSerializer(serializers.Serializer):
+    """Entrada de ``POST /api/v1/ask_sql/`` (Aula 21)."""
+
+    question = serializers.CharField(
+        max_length=500,
+        trim_whitespace=True,
+        allow_blank=False,
+    )
+
+    def validate_question(self, value):
+        pergunta = value.strip()
+        if len(pergunta) < 3:
+            raise serializers.ValidationError(
+                "A pergunta precisa ter ao menos 3 caracteres."
+            )
+        return pergunta
+
+
 class NotificacaoSerializer(serializers.ModelSerializer):
     class Meta:
         model = Notificacao

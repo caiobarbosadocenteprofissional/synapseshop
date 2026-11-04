@@ -65,6 +65,11 @@ tags:
     description: >-
       Sumarização e explicação de logs via LLM, com redação de PII/segredos
       antes do envio e telemetria de latência, erros, tokens e custo.
+  - name: Texto-para-SQL
+    description: >-
+      Consulta em linguagem natural restrita ao papel admin: a LLM gera uma
+      única instrução SELECT, o servidor valida a allow-list de tabelas e
+      colunas e executa em transação read-only com LIMIT e timeout.
 
 paths:
   /health:
@@ -693,6 +698,57 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /api/v1/ask_sql/:
+    post:
+      tags: [Texto-para-SQL]
+      summary: Consulta dados em linguagem natural (admin)
+      description: |
+        Traduz uma pergunta em português para uma única instrução SQL de leitura.
+        A LLM recebe apenas o schema permitido; antes da execução o servidor
+        aplica allow-list de tabelas/colunas, bloqueia escrita/DDL, `SELECT *`,
+        funções perigosas e múltiplas instruções. A consulta roda em transação
+        PostgreSQL `READ ONLY`, com `statement_timeout` e um `LIMIT` externo
+        imposto pelo servidor (a LLM não controla o teto).
+      operationId: createAskSql
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AskSQLRequest'
+            examples:
+              usuariosComMaisPedidos:
+                summary: Ranking de usuários por pedidos
+                value:
+                  question: Quais usuários fizeram mais pedidos?
+      responses:
+        '200':
+          description: SQL gerado e resultado da consulta.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AskSQLResponse'
+        '400':
+          description: Pergunta inválida ou SQL fora da política de segurança.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '503':
+          $ref: '#/components/responses/AssistIndisponivel'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -890,6 +946,17 @@ components:
             $ref: '#/components/schemas/Problem'
           example:
             detail: Timeout na conexão com o provedor.
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    UnprocessableEntity:
+      description: SQL sintaticamente aceito pela política, mas inválido na execução.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            detail: 'Falha ao executar a consulta: column "x" does not exist'
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
@@ -1429,6 +1496,43 @@ components:
       properties:
         answer:
           type: string
+        meta:
+          $ref: '#/components/schemas/AssistMeta'
+    AskSQLRequest:
+      type: object
+      required: [question]
+      properties:
+        question:
+          type: string
+          minLength: 3
+          maxLength: 500
+          description: Pergunta de negócio em linguagem natural.
+    AskSQLResponse:
+      type: object
+      required: [question, sql, columns, rows, count, truncated, meta]
+      properties:
+        question:
+          type: string
+          description: Pergunta original, preservada para auditoria.
+        sql:
+          type: string
+          description: Instrução SELECT validada e efetivamente executada.
+        columns:
+          type: array
+          items:
+            type: string
+        rows:
+          type: array
+          description: Linhas como arrays, na ordem de `columns`.
+          items:
+            type: array
+            items: {}
+        count:
+          type: integer
+          description: Quantidade de linhas devolvidas (após o LIMIT do servidor).
+        truncated:
+          type: boolean
+          description: True quando havia mais linhas do que `ASK_SQL_MAX_LINHAS`.
         meta:
           $ref: '#/components/schemas/AssistMeta'
     AssistStats:

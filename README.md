@@ -144,6 +144,99 @@ Para aplicar a migração manualmente no serviço da API:
 docker compose exec api python manage.py migrate
 ```
 
+## 20. Consulta em Linguagem Natural — Texto-para-SQL (Aula 21)
+
+### Endpoint admin-only
+
+`POST /api/v1/ask_sql/` recebe uma pergunta em português e devolve o SQL gerado
+e o resultado. Exige JWT com `role=admin`: a consulta atravessa dados de todos
+os usuários e consome tokens pagos do provedor.
+
+```bash
+curl -s -X POST http://localhost:8000/api/v1/ask_sql/ \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"question":"Quais usuários fizeram mais pedidos?"}'
+```
+
+```json
+{
+  "question": "Quais usuários fizeram mais pedidos?",
+  "sql": "SELECT u.username, COUNT(p.id) AS total_pedidos FROM ...",
+  "columns": ["username", "total_pedidos"],
+  "rows": [["admin", 3], ["user", 1]],
+  "count": 2,
+  "truncated": false,
+  "meta": {
+    "tokens_prompt": 812,
+    "tokens_output": 64,
+    "tentativas": 1,
+    "latencia_ms": 740.2,
+    "custo_estimado_usd": 0.0,
+    "modelo": "gpt-4o-mini",
+    "redacoes": 0
+  }
+}
+```
+
+Erros: `400` pergunta inválida ou SQL fora da política; `401` sem token;
+`403` usuário não-admin; `422` SQL válido na política mas inválido no banco;
+`429`/`502`/`503`/`504` seguem o contrato do `llm_service`.
+
+### Segurança em camadas
+
+- **Schema mínimo:** `services/texto_sql/schema.py` declara apenas as tabelas de
+  negócio (`repositories_user`, `repositories_category`, `repositories_item`,
+  `repositories_pedido`, `repositories_pedidoitem`, `repositories_pagamento`)
+  e as colunas expostas. Tabelas de autenticação, idempotência,
+  métricas e colunas como `password`/`email` não entram no prompt.
+- **Uma instrução, só leitura:** `services/texto_sql/seguranca.py` usa
+  `sqlparse` para exigir exatamente um `SELECT`/`WITH`; bloqueia DML/DDL,
+  múltiplas instruções, comentários, `SELECT *`, funções de sistema
+  (`pg_sleep`, leitura de arquivo, etc.) e schemas `information_schema`/`pg_*`.
+- **Allow-list:** tabelas e colunas são conferidas contra o schema permitido;
+  aliases de `JOIN` são resolvidos para validar colunas qualificadas.
+- **Execução:** `services/texto_sql/execucao.py` roda em transação PostgreSQL
+  `READ ONLY`, com `statement_timeout`, e aplica `LIMIT` externo
+  (`ASK_SQL_MAX_LINHAS + 1`) para detectar truncamento sem confiar no `LIMIT`
+  da LLM.
+- **Privacidade:** a pergunta passa por `redigir()` antes de sair para o
+  provedor; o SQL e a pergunta original ficam na resposta para auditoria.
+
+### Configuração
+
+| Variável | Default | Efeito |
+| :--- | :--- | :--- |
+| `ASK_SQL_MAX_LINHAS` | `200` | Teto de linhas devolvidas; excedente marca `truncated=true`. |
+| `ASK_SQL_TIMEOUT_MS` | `5000` | `statement_timeout` da transação de leitura. |
+| `ASK_SQL_MAX_TOKENS` | `512` | `max_tokens` da chamada de geração de SQL. |
+| `ASK_SQL_TEMPERATURE` | `0.0` | Determinismo da geração. |
+| `API_BASE_URL` | `http://api:8000` | URL usada pelo Streamlit para chamar a API. |
+
+### Painel Streamlit
+
+O painel em `http://localhost:8501` tem duas abas: **Desempenho da API** e
+**Consulta em Linguagem Natural**. A segunda exige login admin na barra lateral
+(`POST /api/v1/auth/token/`); o token fica apenas em `st.session_state`. A tela
+mostra o SQL executado, a contagem, o indicador de truncamento, a latência da
+LLM e o resultado em `st.dataframe`.
+
+### Desenvolvimento sem provedor pago
+
+`python mock_llm.py` reconhece o prompt de Texto-para-SQL e devolve consultas
+determinísticas e compatíveis com a allow-list. Com
+`LLM_BASE_URL=http://host.docker.internal:9999/v1` e `LLM_API_KEY=mock-local`,
+o fluxo completo (extração → validação → PostgreSQL → Streamlit) roda offline.
+
+### Testes
+
+```bash
+python -m pytest tests/unit/test_texto_sql.py tests/integration/test_api_ask_sql.py -q
+```
+
+Os testes cobrem extração de SQL, allow-list, bloqueio de escrita, CTE,
+truncamento, erros `400`/`422` e mapeamento dos erros da LLM.
+
 ## 5. Arquitetura-Alvo em 6 Camadas
 
 O sistema é projetado em **6 camadas lógicas**, conteinerizadas via Docker e orquestradas com
@@ -875,6 +968,11 @@ então o ambiente também sobe sem `.env` (com os valores de dev).
 | `LLM_MAX_TOKENS_LIMITE` | `1024` | `api` (teto de `max_tokens` aceito no payload) |
 | `LLM_PRECO_PROMPT_USD_MILHAO` | `0` | `api` (preço por 1M tokens de prompt; `0` = sem preço conhecido) |
 | `LLM_PRECO_OUTPUT_USD_MILHAO` | `0` | `api` (preço por 1M tokens de saída; `0` = sem preço conhecido) |
+| `ASK_SQL_MAX_LINHAS` | `200` | `api` (teto de linhas do Texto-para-SQL, Aula 21) |
+| `ASK_SQL_TIMEOUT_MS` | `5000` | `api` (`statement_timeout` da consulta read-only, Aula 21) |
+| `ASK_SQL_MAX_TOKENS` | `512` | `api` (teto de tokens da geração de SQL, Aula 21) |
+| `ASK_SQL_TEMPERATURE` | `0.0` | `api` (temperatura da geração de SQL, Aula 21) |
+| `API_BASE_URL` | `http://api:8000` | `streamlit` (URL da API para login e `/ask_sql/`) |
 | `LOG_LEVEL_SYNAPSESHOP` | `INFO` | `api`, `pedido-worker` (nível dos logs estruturados) |
 | `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD` / `SEED_ADMIN_EMAIL` | `admin` / `admin` / `admin@synapseshop.local` | `api` (`seed_demo_users`) |
 | `SEED_USER_USERNAME` / `SEED_USER_PASSWORD` / `SEED_USER_EMAIL` | `user` / `user` / `user@synapseshop.local` | `api` (`seed_demo_users`) |
