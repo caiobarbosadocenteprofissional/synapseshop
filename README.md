@@ -238,7 +238,7 @@ python -m pytest tests/unit/test_texto_sql.py tests/integration/test_api_ask_sql
 Os testes cobrem extração de SQL, allow-list, bloqueio de escrita, CTE,
 truncamento, erros `400`/`422` e mapeamento dos erros da LLM.
 
-## 21. CI/CD com GitHub Actions (Aula 22)
+## 21. CI/CD com GitHub Actions (Aulas 22 e 23)
 
 O pipeline fica em [`.github/workflows/ci.yml`](.github/workflows/ci.yml) e roda:
 
@@ -253,10 +253,39 @@ O pipeline fica em [`.github/workflows/ci.yml`](.github/workflows/ci.yml) e roda
 | `test-and-lint` | Instala `requirements-dev.txt`, roda `ruff` e a suíte `pytest` com cobertura; publica `junit.xml` e `coverage.xml` como artefatos. |
 | `contrato` | Valida o `openapi.yaml` contra as rotas reais (`scripts/validar_openapi.py`) e executa `python manage.py check`. |
 | `testes-inventario` | Roda a suíte própria do microsserviço FastAPI (`inventory/tests`) com suas dependências. |
-| `docker-build` | Executa `docker build -t synapseshop-api:test .` para garantir que a imagem continua construindo. |
+| `docker-build` | Constrói a imagem da API com `docker/build-push-action` e cache de camadas (`type=gha`), garantindo que continua empacotando. |
+| `compose` | Valida `docker compose config` e sobe PostgreSQL, Redis, Kafka, API, inventário e Streamlit. Aguarda `/health/pronto` (DB + Redis + broker), `/health` do inventário e `/_stcore/health` do painel. |
+| `deploy` | Deploy simulado: em `push` para `main`/`master`, faz login no DockerHub e publica `synapseshop:latest` e `synapseshop:sha-<commit>` com `docker/login-action` + `docker/build-push-action`. |
 
-Se lint, testes, contrato ou build falharem, o pipeline fica vermelho e o merge
-não deve avançar.
+Se lint, testes, contrato, build ou a orquestração falharem, o pipeline fica
+vermelho e o merge não deve avançar. O `deploy` só roda depois que todos os
+jobs de validação passam.
+
+### Cache de dependências e de imagens
+
+- **Python:** `actions/setup-python` usa `cache: pip` com
+  `requirements*.txt` como chave; `ruff`, `pytest` e as dependências do
+  inventário reaproveitam o cache entre execuções.
+- **Docker:** os jobs `docker-build` e `deploy` usam Buildx com
+  `cache-from`/`cache-to` do tipo `gha` (escopo `api`). As camadas do
+  `Dockerfile` multistage são reutilizadas, então mudanças de código não
+  reinstalam as dependências Python.
+- O `docker-compose.yml` mantém a ordem `requirements.txt` → wheels → código,
+  o que preserva o cache local de build.
+
+### Deploy simulado no DockerHub
+
+Ao dar `push` em `main`/`master` (após os jobs verdes), o job `deploy`:
+
+1. autentica com `docker/login-action` usando `DOCKERHUB_USERNAME` e
+   `DOCKERHUB_TOKEN`;
+2. constrói a imagem reaproveitando o cache do Buildx;
+3. publica `<usuario>/synapseshop:latest` e
+   `<usuario>/synapseshop:sha-<commit>` com `docker/build-push-action`.
+
+Sem os segredos, o job emite um aviso e não falha — assim forks e PRs externos
+continuam validando normalmente. Para simular um rollback, basta redeployar a
+tag `sha-<commit>` anterior.
 
 ### Segredos e variáveis
 
@@ -267,6 +296,9 @@ Configurados em **Settings → Secrets and variables → Actions**:
   `ci-insecure-synapseshop`, suficiente para validar a configuração.
 - `DJANGO_DEBUG=false` e `MENSAGERIA_ENABLED=false` são definidos no workflow
   para o CI não depender de um broker externo nem expor modo de depuração.
+- `DOCKERHUB_USERNAME` e `DOCKERHUB_TOKEN` habilitam o deploy simulado. O token
+  deve ser um *access token* do DockerHub com permissão de escrita, nunca a
+  senha da conta.
 
 Nenhuma credencial real fica no repositório; `.env*` continua no `.gitignore`.
 
@@ -279,6 +311,15 @@ python -m pytest -q
 python scripts/validar_openapi.py
 python manage.py check
 docker build -t synapseshop-api:test .
+
+# validar a orquestração como o job `compose` faz
+cp .env.example .env
+docker compose config --quiet
+docker compose up -d --build postgres redis kafka api inventory streamlit
+curl -fsS http://localhost:8000/health/pronto
+curl -fsS http://localhost:8100/health
+curl -fsS http://localhost:8501/_stcore/health
+docker compose down -v
 ```
 
 ## 5. Arquitetura-Alvo em 6 Camadas
