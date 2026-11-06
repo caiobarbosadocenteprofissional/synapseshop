@@ -134,13 +134,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Valida o arquivo do Compose
-        run: docker compose config --quiet
-
       # O servico streamlit usa env_file: .env. Fora do CI esse arquivo e
       # local; aqui partimos do exemplo versionado (somente defaults de dev).
+      # Precisa existir antes do `config`, que valida o env_file.
       - name: Prepara o .env
         run: cp .env.example .env
+
+      - name: Valida o arquivo do Compose
+        run: docker compose config --quiet
 
       - name: Sobe os servicos integrados
         run: docker compose up -d --build postgres redis kafka api inventory streamlit
