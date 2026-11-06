@@ -8,8 +8,9 @@ on:
   workflow_dispatch:
 
 # Segredos ficam em Settings -> Secrets and variables -> Actions
-# (ex.: DJANGO_SECRET_KEY). Sem o segredo, o CI usa um valor efêmero apenas
-# para os testes; nenhuma credencial real é versionada.
+# (DJANGO_SECRET_KEY, DOCKERHUB_USERNAME e DOCKERHUB_TOKEN). Sem o segredo,
+# o CI usa um valor efêmero apenas para os testes; nenhuma credencial real é
+# versionada.
 env:
   DJANGO_SECRET_KEY: ${{ secrets.DJANGO_SECRET_KEY || 'ci-insecure-synapseshop' }}
   DJANGO_DEBUG: "false"
@@ -106,5 +107,108 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build da imagem da API
-        run: docker build -t synapseshop-api:test .
+      - name: Configura Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Reaproveita as camadas entre execucoes (type=gha). O cache do pip ja
+      # vem do setup-python; aqui o alvo e o cache de imagem Docker.
+      - name: Build da imagem da API (com cache)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          load: true
+          tags: synapseshop-api:test
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+
+  compose:
+    name: Orquestracao com Docker Compose
+    runs-on: ubuntu-latest
+    # No CI global a mensageria fica desligada para os testes nao dependerem de
+    # broker. Aqui o objetivo e justamente validar a comunicacao, entao religa.
+    env:
+      MENSAGERIA_ENABLED: "true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Valida o arquivo do Compose
+        run: docker compose config --quiet
+
+      # O servico streamlit usa env_file: .env. Fora do CI esse arquivo e
+      # local; aqui partimos do exemplo versionado (somente defaults de dev).
+      - name: Prepara o .env
+        run: cp .env.example .env
+
+      - name: Sobe os servicos integrados
+        run: docker compose up -d --build postgres redis kafka api inventory streamlit
+
+      # /health/pronto valida a comunicacao com PostgreSQL, Redis e broker;
+      # /health do inventario confirma o servico FastAPI; o endpoint
+      # /_stcore/health confirma que o painel Streamlit subiu.
+      - name: Aguarda API, inventario e painel
+        run: |
+          set -euo pipefail
+          wait_for() {
+            local url="$1" name="$2"
+            for i in $(seq 1 60); do
+              if curl -fsS "$url" >/dev/null; then
+                echo "ok: $name ($url)"
+                return 0
+              fi
+              sleep 5
+            done
+            echo "timeout aguardando $name ($url)"
+            docker compose logs --tail=120
+            return 1
+          }
+          wait_for http://localhost:8000/health/pronto "API pronta (DB+Redis+broker)"
+          wait_for http://localhost:8100/health "inventario"
+          wait_for http://localhost:8501/_stcore/health "painel Streamlit"
+
+      - name: Derruba o ambiente
+        if: always()
+        run: docker compose down -v
+
+  # Deploy simulado (Aula 23): so publica a partir dos branches de entrega.
+  # Sem os segredos o job termina com aviso, para nao quebrar forks/PRs.
+  deploy:
+    name: Deploy simulado no DockerHub
+    needs: [test-and-lint, contrato, testes-inventario, docker-build, compose]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: ubuntu-latest
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configura Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login no DockerHub
+        if: env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != ''
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+
+      - name: Build e push da imagem
+        if: env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != ''
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ env.DOCKERHUB_USERNAME }}/synapseshop:latest
+            ${{ env.DOCKERHUB_USERNAME }}/synapseshop:sha-${{ github.sha }}
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+
+      - name: Aviso de segredos ausentes
+        if: env.DOCKERHUB_USERNAME == '' || env.DOCKERHUB_TOKEN == ''
+        run: echo "::warning::Defina DOCKERHUB_USERNAME e DOCKERHUB_TOKEN em Settings > Secrets and variables > Actions."
