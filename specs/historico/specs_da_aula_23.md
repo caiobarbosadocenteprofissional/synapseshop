@@ -42,6 +42,6 @@ Com base nos *workflows* configurados na aula anterior (Aula 22) e utilizando a 
 
   > Evidência: entrada de 2026-11-06 na seção 2 do `PROMPTS.md`.
 
-* [ ] O painel do GitHub Actions (*Actions*) valida com sucesso todas as etapas (testes, *lint*, *build* e *compose*) a cada novo *push*.
+* [x] O painel do GitHub Actions (*Actions*) valida com sucesso todas as etapas (testes, *lint*, *build* e *compose*) a cada novo *push*.
 
-  > Pendente de confirmação no primeiro *push* para o GitHub; os jobs `docker-build` e `compose` foram adicionados neste commit.
+  > Evidência: execução [42290028143](https://github.com/caiobarbosadocenteprofissional/synapseshop/actions/runs/42290028143) no branch `dev` — `test-and-lint`, `contrato`, `testes-inventario`, `docker-build` e `compose` concluídos com sucesso.
